@@ -252,4 +252,43 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onToggleKeydown))
   opacity: 0;
   pointer-events: none;
 }
+
+// ---- 移动端适配 -----------------------------------------------------------
+// 桌面端 7 个工具栏按钮横向铺开占 ~475px(间距 75px、图标 25px),窄屏会溢出左侧。
+// 移动端整体收紧:图标缩到 20px、间距收到 38px、起点贴近右边缘 12px,
+// 让全部按钮在 ≥320px 视口下完整可见。仅调整 right / 尺寸,不改结构与桌面端布局。
+@media (max-width: 600px) {
+  .edit-toggle {
+    right: 12px;
+    top: 12px;
+
+    img {
+      width: 20px;
+    }
+
+    &--chat09 {
+      right: 50px;
+    }
+
+    &--bg {
+      right: 88px;
+    }
+
+    &--delete {
+      right: 126px;
+    }
+
+    &--export {
+      right: 164px;
+    }
+
+    &--share {
+      right: 202px;
+    }
+
+    &--about {
+      right: 240px;
+    }
+  }
+}
 </style>
