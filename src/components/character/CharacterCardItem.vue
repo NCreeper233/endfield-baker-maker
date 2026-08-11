@@ -15,6 +15,7 @@ import { computed, ref } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useChatStore } from '../../stores/chat'
 import { MATERIALS } from '../../constants/materials'
+import { isCustomAvatar } from '../../constants/character'
 import { subTopInCard } from '../../constants/characterCard'
 import SubCard from './SubCard.vue'
 
@@ -23,12 +24,19 @@ import SubCard from './SubCard.vue'
 // 这两张是 72×131 竖幅小图,用 contain 完整显示,不参与 scale 收紧裁剪
 const NPC_AVATAR_KEYS = ['icon_sns_npc_single_a', 'icon_sns_npc_channel_a']
 const isNpcAvatar = (url: string) => !!url && NPC_AVATAR_KEYS.some((k) => url.includes(k))
+// 自定义角色头像(data URL)同样不做二次裁切(已是方形)
+const isCustomAvatarUrl = (url: string) => isCustomAvatar(url)
 
 const props = defineProps<{
   /** 主卡索引 */
   index: number
   /** 该主卡的 top 偏移(由 CharacterCardList 计算) */
   top: number
+}>()
+
+const emit = defineEmits<{
+  /** 编辑模式点击群聊卡片头像:请求打开"自定义群聊头像"弹窗(上抛到 App) */
+  (e: 'open-group-avatar', cardIndex: number): void
 }>()
 
 const chatStore = useChatStore()
@@ -65,6 +73,21 @@ const allPlayed = computed(() => {
 
 /** 该主卡对应的干员数据(name + avatar) */
 const character = computed(() => chatStore.cardCharacters[props.index])
+
+/** 该主卡是否为群聊(卡片级成员 ≥2;决定头像能否自定义) */
+const isGroupCard = computed(
+  () => (chatStore.conversationMeta[range.value.start]?.members.length ?? 0) >= 2,
+)
+
+/**
+ * 编辑模式下点击群聊卡片头像:请求打开"自定义群聊头像"弹窗
+ *
+ * 仅群聊(成员 ≥2)可自定义;私聊 / 未命名对话点击无动作(头像取角色/默认)。
+ */
+function onAvatarClick() {
+  if (!isEditMode.value || !isGroupCard.value) return
+  emit('open-group-avatar', props.index)
+}
 
 /** 局部 hover 状态:null=未 hover / 'card'=主卡 / 数字=对应子卡在主卡内的下标 */
 const hover = ref<null | 'card' | number>(null)
@@ -110,7 +133,20 @@ function leave(event: PointerEvent) {
       <p class="card__name">{{ character.name }}</p>
       <img class="card__underline" :src="MATERIALS.underline" alt="" />
       <img class="card__corner" :src="MATERIALS.cornerDeco" alt="" />
-      <div class="card__avatar" :class="{ 'is-npc': isNpcAvatar(character.avatar) }">
+      <div
+        class="card__avatar"
+        :class="{
+          'is-npc': isNpcAvatar(character.avatar),
+          'is-custom': isCustomAvatarUrl(character.avatar),
+          'is-editable': isEditMode && isGroupCard,
+        }"
+        role="button"
+        :tabindex="isEditMode && isGroupCard ? 0 : -1"
+        :aria-label="isEditMode && isGroupCard ? '自定义群聊头像' : undefined"
+        @click="onAvatarClick"
+        @keydown.enter.prevent="onAvatarClick"
+        @keydown.space.prevent="onAvatarClick"
+      >
         <!-- 裁剪夹层:overflow:hidden 限制 img scale 后的可见范围,
              外层 &__avatar 保持 overflow:visible 让 chat-indicator 能超出边框显示 -->
         <div class="card__avatar-clip">
@@ -121,6 +157,13 @@ function leave(event: PointerEvent) {
           v-if="!allPlayed && !isEditMode"
           class="card__chat-indicator"
           :src="MATERIALS.chatBadge"
+          alt=""
+        />
+        <!-- 编辑模式 + 群聊:右下角"可编辑"角标(点击头像自定义群聊头像) -->
+        <img
+          v-if="isEditMode && isGroupCard"
+          class="card__avatar-edit"
+          :src="MATERIALS.editModeToggle"
           alt=""
         />
       </div>
@@ -280,6 +323,41 @@ function leave(event: PointerEvent) {
       // NPC 用 contain 完整显示,不需要 scale 放大
       transform: none;
     }
+
+    // 自定义角色头像(data URL,用户已裁好的方形图):
+    // 与 NPC 同理不做二次裁切(cover + scale 会切掉脸),居中铺满
+    &.is-custom &-img {
+      object-fit: cover;
+      object-position: center center;
+      transform: none;
+    }
+
+    // 编辑模式 + 群聊:头像可点击自定义(打开裁剪弹窗)
+    &.is-editable {
+      cursor: pointer;
+    }
+  }
+
+  // 右下角"可编辑"角标(编辑模式 + 群聊头像):小圆底承载编辑图标,悬停时淡入
+  &__avatar-edit {
+    position: absolute;
+    right: -5px;
+    bottom: -5px;
+    z-index: 13;
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    background: rgba(0, 0, 0, 0.72);
+    padding: 4px;
+    box-sizing: border-box;
+    object-fit: contain;
+    opacity: 0;
+    transition: opacity 0.15s ease;
+    pointer-events: none;
+  }
+
+  &:hover &__avatar-edit {
+    opacity: 1;
   }
 
   // 未读消息提示图标:头像右上角,以图片中心为轴左右晃动

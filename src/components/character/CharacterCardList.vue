@@ -16,6 +16,11 @@ import {
 } from '../../constants/characterCard'
 import CharacterCardItem from './CharacterCardItem.vue'
 
+const emit = defineEmits<{
+  /** 编辑模式点击群聊卡片头像:转发给 App 打开"自定义群聊头像"弹窗 */
+  (e: 'open-group-avatar', cardIndex: number): void
+}>()
+
 const chatStore = useChatStore()
 const { collapsed, cards } = storeToRefs(chatStore)
 
@@ -37,6 +42,7 @@ const cardPadTop = computed(() => computeCardPadTop(collapsed.value, subCounts.v
       :key="index"
       :index="index"
       :top="top"
+      @open-group-avatar="emit('open-group-avatar', $event)"
     />
     <div class="card-pad" :style="{ top: cardPadTop + 'px' }" />
   </section>

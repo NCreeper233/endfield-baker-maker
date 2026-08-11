@@ -16,33 +16,115 @@
 
 import { computed, ref, watch } from 'vue'
 import { defineStore } from 'pinia'
-import type { Card, ChatMessage, Conversation, MessageSpeaker, PlayerChoice } from '../types/chat'
+import type { Card, CardIdentity, ChatMessage, Conversation, MessageSpeaker, PlayerChoice } from '../types/chat'
 import {
   findCharacter,
   DEFAULT_AVATAR_URL,
   MINE_AVATAR_URL,
   MINE_AVATAR_FEMALE_URL,
+  type CustomCharacter,
+  type PronounGender,
 } from '../constants/character'
 import { MATERIALS } from '../constants/materials'
-import { INITIAL_CARDS } from '../constants/initialCards'
+import { createInitialCards } from '../constants/initialCards'
 
 /**
  * 按角色名查找头像 URL
  *
- * 从 character.ts 的内置干员表查找;未找到时回退到 DEFAULT_AVATAR_URL。
- * 头像已本地托管(src/assets/avatars/,经 Vite import.meta.glob 打包),
- * 不再依赖远程 CDN。
+ * - 传 customId + 自定义注册表:先按 id 查自定义角色(重名时区分的关键)
+ * - 未命中再查 character.ts 的内置干员表;都未找到回退 DEFAULT_AVATAR_URL。
+ * 头像已本地托管(src/assets/avatars/,经 Vite import.meta.glob 打包)。
  *
- * @param name 角色名(对应 conversation.name)
- * @returns   头像 URL(本地资源)
+ * @param name      角色名(对应 conversation.name / speakerName)
+ * @param customId  自定义角色 id(可选;存在时优先查自定义注册表)
+ * @param customList 自定义角色注册表(可选;resolveAvatar 为纯函数,注册表由调用方传入)
+ * @returns         头像 URL(本地资源 / 自定义 data URL / 默认占位)
  */
-function resolveAvatar(name: string): string {
+function resolveAvatar(
+  name: string,
+  customId?: string,
+  customList?: CustomCharacter[],
+): string {
+  if (customId && customList) {
+    const c = customList.find((x) => x.id === customId)
+    if (c) return c.avatar
+  }
   return findCharacter(name)?.avatar ?? DEFAULT_AVATAR_URL
 }
 
 /** 是否管理员身份(管理员角色名固定为这两个) */
 export function isAdminName(name: string): boolean {
   return name === '管理员 (男)' || name === '管理员 (女)'
+}
+
+/** 默认"我方身份"(管理员·男,身份缺失时的兜底) */
+export const DEFAULT_MY_IDENTITY: CardIdentity = {
+  name: '管理员 (男)',
+  avatar: MINE_AVATAR_URL,
+}
+
+/**
+ * "我"的判定谓词:两个身份是否完全一致
+ *
+ * 只比较 name + customId(身份键),不参与 avatar——
+ * 便于用"名称 + 消息里的 speakerCustomId"与卡片身份做对拍。
+ * 必须精确匹配姓名(而非 roleNameKey):管理员(男/女)虽是两个独立角色键
+ * (admin:male / admin:female),但两者显示名相同("管理员"),判"我"仍需
+ * 靠性别全名精确区分,不能用归一化显示名。
+ */
+export function identityMatches(
+  a: { name: string; customId?: string },
+  b: { name: string; customId?: string },
+): boolean {
+  return a.name === b.name && (a.customId ?? undefined) === (b.customId ?? undefined)
+}
+
+/** 取某张父卡的"我方身份"(缺失回退默认管理员·男) */
+function identityOfCard(card: Card | undefined): CardIdentity {
+  return card?.myIdentity ?? DEFAULT_MY_IDENTITY
+}
+
+/**
+ * 按成员引用解析称呼代词(他/她/它)
+ *
+ * - 自定义成员(customId 存在):优先查注册表,gender 直接取自自定义角色
+ * - 内置成员:查 character.ts 内置表(male / female)
+ * - 都未命中返回 undefined,由调用方决定回退(子卡预览私聊默认"她")
+ *
+ * @param ref        成员引用(name + 可选 customId)
+ * @param customList 自定义角色注册表
+ */
+export function genderOfRef(
+  ref: ConversationMember,
+  customList: CustomCharacter[],
+): PronounGender | undefined {
+  if (ref.customId) {
+    const c = customList.find((x) => x.id === ref.customId)
+    if (c) return c.gender
+  }
+  return findCharacter(ref.name)?.gender
+}
+
+/**
+ * 对话成员引用(name + 自定义 id)
+ *
+ * 内置角色仅有 name;自定义角色额外携带 customId——
+ * 重名时(如自定义"梨诺")靠 customId 解析头像/性别,不按名字误命中内置表。
+ */
+export interface ConversationMember {
+  name: string
+  /** 自定义角色 id(内置角色缺失) */
+  customId?: string
+}
+/**
+ * 按 id 查找自定义角色(纯函数;注册表由调用方传入)
+ *
+ * @param list 自定义角色注册表
+ * @param id   目标 id(undefined 直接返回 undefined)
+ */
+function findCustomById(list: CustomCharacter[], id: string | undefined): CustomCharacter | undefined {
+  if (!id) return undefined
+  return list.find((c) => c.id === id)
 }
 
 /** 是否"玩家选择点"消息(mine + 携带 choices) */
@@ -78,6 +160,18 @@ const DEFAULT_CHOICE_LABEL = '新选项'
  */
 let choiceIdCounter = 0
 
+/** 角色名称显示开关的 localStorage key(设置类数据,独立于工程数据) */
+const CHAR_NAMES_STORAGE_KEY = 'endfield-baker-char-names'
+
+/** 读取角色名称显示开关(未记录 / 读取异常回退 false) */
+function readCharacterNamesToggle(): boolean {
+  try {
+    return localStorage.getItem(CHAR_NAMES_STORAGE_KEY) === '1'
+  } catch {
+    return false
+  }
+}
+
 /**
  * 统一"选项对象"构造工厂(PlayerChoice 唯一构造点)
  *
@@ -101,24 +195,36 @@ function nextMessageId(conv: Conversation): number {
 }
 
 /**
- * 提取对话中出现的非管理员成员(按出现顺序去重)
+ * 提取对话中出现的"对方"成员(按出现顺序去重)
  *
+ * - 排除本卡"我方身份"(精确匹配 name + customId):我方消息 / 与身份一致的
+ *   消息一律不计入成员——"我"是群聊标题的后缀(和{身份}的群聊),不是顿号列表成员
  * - other 侧消息:取 speakerName,未指定时回退 conv.name(旧数据兼容)
  * - mine 侧消息:只认显式 speakerName(旧数据无 speakerName 时**不回退**
- *   conv.name——mine 侧是管理员/我本人,回退会把私聊对象名错误算成
- *   "由我方消息带来的成员",导致对方全部换身份后名字残留)
- * - 管理员名一律不计入成员
+ *   conv.name——mine 侧是"我"本人,回退会把私聊对象名错误算成成员)
+ * - 身份为管理员(男或女)时,该性别的管理员经身份精确匹配被排除;
+ *   身份为非管理员时,管理员(男/女)都是真实"对方"成员,可同时出现在群聊
+ *   (显示名同"管理员",见 adminDisplayName),保留原名供头像/性别解析
+ * - 成员带 customId(自定义角色消息的 speakerCustomId):首见即记录,
+ *   同一名字若既是内置又是自定义,取首次出现的 customId(重名区分)
+ *
+ * 去重按身份键(memberNameKey)而非名字:同一对话内"内置梨诺"与"自定义梨诺"
+ * 是两个独立成员(同名不同人),按键去重后两者并存,与跨对话的 unionMembers
+ * 使用同一套去重语义;自定义与内置同名时靠 custom:${id} 键区分,可同时保留。
  */
-function memberNamesOf(conv: Conversation): string[] {
+function memberNamesOf(conv: Conversation, identity: CardIdentity): ConversationMember[] {
   const seen = new Set<string>()
-  const list: string[] = []
+  const list: ConversationMember[] = []
   for (const msg of conv.messages) {
     // mine 侧:仅显式 speakerName 参与;other 侧:可回退会话名
     const name = msg.side === 'mine' ? msg.speakerName : msg.speakerName ?? conv.name
-    if (!name || isAdminName(name)) continue
-    if (!seen.has(name)) {
-      seen.add(name)
-      list.push(name)
+    if (!name) continue
+    // 与卡片身份精确一致 = "我",不进入成员
+    if (identityMatches({ name, customId: msg.speakerCustomId }, identity)) continue
+    const key = memberNameKey({ name, customId: msg.speakerCustomId })
+    if (!seen.has(key)) {
+      seen.add(key)
+      list.push({ name, customId: msg.speakerCustomId })
     }
   }
   return list
@@ -128,19 +234,26 @@ function memberNamesOf(conv: Conversation): string[] {
  * 卡片级成员并集(保留首次出现顺序去重)
  *
  * 一张父卡 = 一个会话组:所有子对话的成员取并集,父级卡片与全部子对话
- * 共享同一标题/头像(群聊判定以卡片为单位)。
+ * 共享同一标题/头像(群聊判定以卡片为单位)。customId 首次出现保留。
  *
- * @param convs 一张父卡下的所有子对话
- * @returns     成员名数组(已排除管理员,按出现顺序去重)
+ * 去重按身份键(memberNameKey)而非名字:管理员男/女是独立键
+ * ('admin:male' / 'admin:female'),两者可同时成为群聊成员
+ * (显示名同"管理员",见 adminDisplayName);自定义角色与内置角色
+ * 同名时靠 custom:id 键区分,可同时保留。
+ *
+ * @param convs     一张父卡下的所有子对话
+ * @param identity  本卡"我方身份"
+ * @returns         成员引用数组(已排除"我",按出现顺序去重)
  */
-function unionMembers(convs: Conversation[]): string[] {
+function unionMembers(convs: Conversation[], identity: CardIdentity): ConversationMember[] {
   const seen = new Set<string>()
-  const list: string[] = []
+  const list: ConversationMember[] = []
   for (const conv of convs) {
-    for (const name of memberNamesOf(conv)) {
-      if (!seen.has(name)) {
-        seen.add(name)
-        list.push(name)
+    for (const member of memberNamesOf(conv, identity)) {
+      const key = memberNameKey(member)
+      if (!seen.has(key)) {
+        seen.add(key)
+        list.push(member)
       }
     }
   }
@@ -148,26 +261,78 @@ function unionMembers(convs: Conversation[]): string[] {
 }
 
 /**
- * 卡片级"我方"(mine)实际发言身份标签
+ * 卡片"我方身份"的显示名(群聊标题"和{xx}的群聊"的后缀)
  *
- * 群聊标题"和{xx}的群聊"的后缀应取消息中**真实存在**的一方发言身份,
- * 而不能取发送按钮(EditModePanel 最左头像)当前挂着的待定身份——
- * 没发消息前只是改了个按钮,不该让标题里的"管理员"被替换成选中角色。
- *
- * 规则:跨卡片下所有子对话遍历 mine 侧消息,取第一条的 speakerName
- * (speakerName 缺失按管理员处理);无任何 mine 消息时回退"管理员"。
- *
- * @param convs 一张父卡下的所有子对话
+ * 身份是管理员(男/女)时归一化显示"管理员"(不随性别全名变化);
+ * 其他角色直接用原名(如"陈千语")。创建该卡时已定死,不再随消息变化。
  */
-function cardPersonaLabel(convs: Conversation[]): string {
-  for (const conv of convs) {
-    for (const m of conv.messages) {
-      if (m.side === 'mine') {
-        return isAdminName(m.speakerName ?? '') || !m.speakerName ? '管理员' : m.speakerName
-      }
-    }
+function identityLabel(identity: CardIdentity): string {
+  return isAdminName(identity.name) ? '管理员' : identity.name
+}
+
+/**
+ * 管理员姓名的**显示名**:男/女一律显示"管理员",不暴露性别全名
+ *
+ * 数据内部仍保留完整名(管理员 (男)/(女))用于性别/头像解析,
+ * 仅渲染层经此归一化。非管理员原样返回。
+ */
+export function adminDisplayName(name: string): string {
+  return isAdminName(name) ? '管理员' : name
+}
+
+/**
+ * 角色显示名覆盖表的身份键(卡片级 roleNames 的 key)
+ *
+ * 四种身份互不冲突(前缀隔离):
+ * - 自定义角色(customId 存在) → `custom:${id}`(重名内置/自定义靠 id 区分)
+ * - 管理员男 → `admin:male`(管理员 (男) 的真实数据名)
+ * - 管理员女 → `admin:female`(管理员 (女) 的真实数据名)
+ * - 其余(内置角色 / NPC / 未知名) → `builtin:${name}`
+ *
+ * 男/女管理员是两个**独立**角色键(可各自改名、群聊里可同时成为两名成员);
+ * 但显示名默认都归一化"管理员"(见 adminDisplayName / identityLabel)。
+ * 裸标签 "管理员"(identityLabel 归一化后的后缀)保留 'admin' 旧键作别名,
+ * 供历史数据 / 极少量裸名 speakerName 兜底,正常解析路径不传它。
+ *
+ * @param name     角色名
+ * @param customId 自定义角色 id(可选)
+ */
+export function roleNameKey(name: string, customId?: string): string {
+  if (customId) return `custom:${customId}`
+  if (name === '管理员 (男)') return 'admin:male'
+  if (name === '管理员 (女)') return 'admin:female'
+  if (name === '管理员') return 'admin'
+  return `builtin:${name}`
+}
+
+/** 成员引用 → 身份键(memberNameKey / speakerNameKey 共用同一套键规则) */
+export function memberNameKey(m: ConversationMember): string {
+  return roleNameKey(m.name, m.customId)
+}
+
+/**
+ * 消息 → 身份键(供渲染层按消息定位覆盖表中的显示名)
+ *
+ * - mine 侧:按本卡"我方身份"派生键(管理员男/女 → 'admin:male'/'admin:female',
+ *   使改名一并对群聊标题后缀生效;自定义身份 → 'custom:id';内置角色 → 'builtin:名字')。
+ *   myIdentity 缺省(调用方未传)时回退 'admin:male'(兼容旧调用,默认管理员男)。
+ * - other 侧:显式 speakerName 优先,否则回退会话名(旧数据无 speakerName 时);
+ *   自定义角色经 speakerCustomId 定位(与内置同名区分)
+ * - 匿名说话人(speakerName 为空串,由 addMessageAvatar 制造):按消息 id 独立成键
+ *   'anonymous:<id>'——匿名者彼此互不知名,改其中一条的显示名不应波及其余匿名消息
+ *   (resolveSpeakerName 读与 ChatArea.onNameUpdate 写都传入同一消息的 id,键才命中)
+ */
+export function speakerNameKey(
+  msg: MessageSpeaker,
+  convName: string,
+  myIdentity?: CardIdentity,
+): string {
+  if (msg.side === 'mine') {
+    return myIdentity ? roleNameKey(myIdentity.name, myIdentity.customId) : 'admin:male'
   }
-  return '管理员'
+  // 空串显式匿名:非 nullish,不能走 `?? convName` 回退
+  if (msg.speakerName === '') return `anonymous:${msg.id ?? 'none'}`
+  return roleNameKey(msg.speakerName ?? convName, msg.speakerCustomId)
 }
 
 /**
@@ -178,19 +343,33 @@ function cardPersonaLabel(convs: Conversation[]): string {
  *   - 1 个成员:该角色名(私聊)
  *   - ≥2 个成员:成员顿号连接 + '和{personaLabel}的群聊'(群聊,例:陈千语、庄方宜和管理员的群聊)
  *
+ * 成员名经 displayNameOf 应用卡片级角色显示名覆盖(customTitle 分支不参与覆盖,
+ * 保证"手动自定义群聊名不跟随改名")。
+ *
  * @param personaLabel "我"的身份显示名(默认"管理员";更换身份后为新角色名)
+ * @param displayNameOf 角色显示名解析(未覆盖时返回原 member.name)
  */
-function titleOf(conv: Conversation, members: string[], personaLabel: string): string {
+function titleOf(
+  conv: Conversation,
+  members: ConversationMember[],
+  personaLabel: string,
+  displayNameOf: (m: ConversationMember) => string,
+): string {
   if (conv.customTitle) return conv.customTitle
   if (members.length === 0) return '未命名会话'
-  if (members.length === 1) return members[0]
-  return `${members.join('、')}和${personaLabel}的群聊`
+  if (members.length === 1) return displayNameOf(members[0])
+  return `${members.map(displayNameOf).join('、')}和${personaLabel}的群聊`
 }
 
-/** 对话头像:群聊固定群聊图,私聊取角色头像,空对话回退默认 */
-function avatarOf(members: string[]): string {
+/**
+ * 对话头像:群聊固定群聊图,私聊取角色头像,空对话回退默认
+ *
+ * @param members    成员引用(自定义成员靠 customId 解析头像)
+ * @param customList 自定义角色注册表(供 resolveAvatar 按 id 查询)
+ */
+function avatarOf(members: ConversationMember[], customList: CustomCharacter[]): string {
   if (members.length >= 2) return MATERIALS.groupAvatar
-  if (members.length === 1) return resolveAvatar(members[0])
+  if (members.length === 1) return resolveAvatar(members[0].name, members[0].customId, customList)
   return DEFAULT_AVATAR_URL
 }
 
@@ -199,7 +378,8 @@ function avatarOf(members: string[]): string {
  *
  * 两条链路必须完全一致,否则编辑菜单里会出现"点开的头像没有黄圈"。
  * 优先级:
- * - mine:一律取全局 mineUrl(管理员头像,随性别切换),不受消息 speakerAvatar 影响
+ * - mine:msg.speakerAvatar(发送时写入的身份头像)优先,缺省回退本卡身份头像
+ *   (mineUrl 由调用方传本卡"我方身份"的头像)
  * - other:msg.speakerAvatar > findCharacter(msg.speakerName ?? convName) > otherUrl
  *   convName 是会话原始名(旧数据未记录 speakerName 时回退,读对话名查角色);
  *   otherUrl 是会话默认对方头像(群聊回退 NPC 默认图,不在角色表 → 无黄圈属预期)。
@@ -207,7 +387,7 @@ function avatarOf(members: string[]): string {
  * @param msg         消息(speakerAvatar/speakerName/侧别)
  * @param convName    会话原始名(activeSub 对应 conversation.name)
  * @param otherUrl    other 侧默认头像(单聊角色头像 / 群聊 NPC 默认)
- * @param mineUrl     我方默认头像(管理员,随全局性别切换男/女)
+ * @param mineUrl     本卡"我方身份"头像(聊天区右侧气泡默认头像)
  */
 function resolveMessageAvatar(
   msg: MessageSpeaker,
@@ -216,7 +396,7 @@ function resolveMessageAvatar(
   mineUrl: string,
 ): string {
   if (msg.side === 'mine') {
-    return mineUrl
+    return msg.speakerAvatar ?? mineUrl
   }
   if (msg.speakerAvatar) return msg.speakerAvatar
   const name = msg.speakerName ?? convName
@@ -229,10 +409,56 @@ function resolveMessageAvatar(
 
 export const useChatStore = defineStore('chat', () => {
   /** 主卡数据(每张主卡下挂任意数量子卡对话) */
-  const cards = ref<Card[]>(INITIAL_CARDS)
+  // 用 createInitialCards() 的独立副本 seed,绝不直接引用 INITIAL_CARDS 常量:
+  // store 增删是原地 push / splice,若与模块常量别名会互相泄漏(见 initialCards.ts)。
+  const cards = ref<Card[]>(createInitialCards())
+
+  /**
+   * 自定义角色注册表(全局生效)
+   *
+   * - 不随某段对话存在,由角色选择面板的 + 按钮创建
+   * - IndexedDB 持久化 + 随 .baker 工程导入/导出(见 useChatPersistence)
+   * - 允许与内置角色重名,靠 id(customId)区分
+   */
+  const customCharacters = ref<CustomCharacter[]>([])
+
+  /** 新增或覆盖自定义角色(同 id 幂等替换,保持注册表稳定) */
+  function addCustomCharacter(c: CustomCharacter) {
+    const i = customCharacters.value.findIndex((x) => x.id === c.id)
+    if (i === -1) customCharacters.value.push(c)
+    else customCharacters.value[i] = c
+  }
+
+  /**
+   * 删除自定义角色(已引用的消息仍保留各自 speakerAvatar,渲染不回退)
+   *
+   * 同时清扫各卡片 roleNames 覆盖表中指向该角色的孤儿键(custom:<id>):
+   * 角色删除后这些键永远无法再命中,却会随 .baker 导出、残留为脏数据;
+   * 清空整张表时把字段置 undefined,保持数据干净。
+   */
+  function removeCustomCharacter(id: string) {
+    customCharacters.value = customCharacters.value.filter((c) => c.id !== id)
+    const orphanKey = `custom:${id}`
+    for (const card of cards.value) {
+      if (!card.roleNames) continue
+      let removed = false
+      for (const key of Object.keys(card.roleNames)) {
+        if (key === orphanKey) {
+          delete card.roleNames[key]
+          removed = true
+        }
+      }
+      if (removed && Object.keys(card.roleNames).length === 0) card.roleNames = undefined
+    }
+  }
+
+  /** 整体替换注册表(导入 .baker 时调用,调用方负责先净化) */
+  function importCustomCharacters(list: CustomCharacter[]) {
+    customCharacters.value = list
+  }
 
   /** 每张主卡的折叠状态(默认全部收起) */
-  const collapsed = ref<boolean[]>(INITIAL_CARDS.map(() => true))
+  const collapsed = ref<boolean[]>(cards.value.map(() => true))
 
   /**
    * 扁平化后的全部子卡对话(按主卡顺序串联)
@@ -259,6 +485,24 @@ export const useChatStore = defineStore('chat', () => {
    * 切换回播放模式:activeSub = null 回到起始页
    */
   const isEditMode = ref(false)
+
+  /**
+   * 是否显示对话内角色名称(小号灰字悬浮于带头像的气泡上方)
+   *
+   * 设置类数据:localStorage 独立 key 持久化(与 useCustomBackground 同类,
+   * 不随 .baker 导出、不受清空对话影响)。读取异常/写入失败静默降级。
+   */
+  const showCharacterNames = ref(readCharacterNamesToggle())
+
+  function toggleShowCharacterNames() {
+    showCharacterNames.value = !showCharacterNames.value
+    try {
+      localStorage.setItem(CHAR_NAMES_STORAGE_KEY, showCharacterNames.value ? '1' : '0')
+    } catch {
+      // 存储失败:仅本次会话生效,刷新恢复默认,不影响主流程
+      console.warn('[store] 角色名称开关保存失败,刷新后将重置')
+    }
+  }
 
   /**
    * 顶部聊天条图片下标(三图循环切换)
@@ -320,15 +564,34 @@ export const useChatStore = defineStore('chat', () => {
    */
   const conversationMeta = computed(() =>
     cards.value.flatMap((card) => {
-      // 卡片级成员并集 + 卡片级"我"的身份显示名(管理员 → "管理员",其他角色 → 该角色名)。
-      // 群聊标题的"和{personaLabel}的群聊"后缀跟随"我"的身份变化。
-      const members = unionMembers(card.conversations)
-      const personaLabel = cardPersonaLabel(card.conversations)
-      const avatar = avatarOf(members)
+      // 本卡"我方身份"(缺失回退管理员·男)。卡片级成员并集(已排除"我")+
+      // 卡片级"我"的身份显示名(管理员 → "管理员",其他角色 → 该角色名)。
+      // 群聊标题的"和{personaLabel}的群聊"后缀 = 本卡身份,创建时已定死。
+      const cardIdentity = identityOfCard(card)
+      const members = unionMembers(card.conversations, cardIdentity)
+      const personaLabel = identityLabel(cardIdentity)
+      // 卡片级角色显示名覆盖表:改名仅改显示,不改写消息数据;
+      // 同一父卡下所有会话共享同一张表(各父卡独立,互不影响)。
+      const roleNames = card.roleNames ?? {}
+      // 成员显示名:覆盖优先,否则原 member.name(头像解析仍按原始 name/customId,不受影响);
+      // 管理员(男/女)归一化显示"管理员"(数据保留性别全名供头像/性别解析)
+      const displayNameOf = (m: ConversationMember) =>
+        roleNames[memberNameKey(m)] ?? adminDisplayName(m.name)
+      // "我"的身份显示名同样可被覆盖(mine 侧"管理员"改名 → 群聊标题后缀跟随);
+      // 用本卡真实身份名派生键(管理员 → 对应性别键),而非归一化显示标签
+      // ("管理员"裸标签无法确定性别,会查不到性别专属的改名)
+      const displayPersona =
+        roleNames[roleNameKey(cardIdentity.name, cardIdentity.customId)] ?? personaLabel
+      // 自定义群聊头像仅群聊(成员 ≥2)生效;私聊 / 未命名回退动态头像
+      const isGroup = members.length >= 2
+      const avatar =
+        isGroup && card.groupAvatar
+          ? card.groupAvatar
+          : avatarOf(members, customCharacters.value)
       // 同一父卡下所有子对话共用同一套 members/persona/avatar;
       // title 额外允许各子对话用 customTitle 单独覆盖(否则即为卡片级动态群聊名)。
       return card.conversations.map((conv) => ({
-        title: titleOf(conv, members, personaLabel),
+        title: titleOf(conv, members, displayPersona, displayNameOf),
         avatar,
         members,
       }))
@@ -354,89 +617,48 @@ export const useChatStore = defineStore('chat', () => {
    */
   const currentOtherAvatarUrl = computed(() => {
     const meta = currentConversationMeta.value
-    if (meta && meta.members.length === 1) return resolveAvatar(meta.members[0])
+    if (meta && meta.members.length === 1)
+      return resolveAvatar(meta.members[0].name, meta.members[0].customId, customCharacters.value)
     return DEFAULT_AVATAR_URL
   })
 
-  /**
-   * 管理员头像性别(男 / 女,默认男)
-   *
-   * 由页面最上方工具栏的头像按钮全局切换,作用于整个页面所有对话。
-   * 角色选择面板中管理员(男/女)已禁用,无法再经消息身份更换路径改变。
-   *
-   * 独立于 myIdentity(发送身份):无论当前发送身份是管理员还是某个角色,
-   * 管理员性别都保持独立可切换;切换时若发送身份恰是管理员,同步更新
-   * myIdentity 的姓名/头像,使新发消息带上新性别。
-   */
-  const adminGender = ref<'male' | 'female'>('male')
-
-  /**
-   * "我方"头像 URL(管理员·男 / 女,随全局性别切换)
-   *
-   * 聊天区右侧气泡 / 导出截图均读取此值,mine 侧一律以它为最终头像
-   * (不受消息 speakerAvatar 影响,保证切换全局生效)。
-   */
-  const mineAvatarUrl = computed(() =>
-    adminGender.value === 'male' ? MINE_AVATAR_URL : MINE_AVATAR_FEMALE_URL,
-  )
-
-  /**
-   * 切换"我方"管理员头像性别(男 ↔ 女,全局生效)
-   *
-   * 无条件翻转 adminGender(不依赖当前发送身份是否管理员);
-   * 若发送身份恰是管理员(男/女),同步更新 myIdentity 的姓名/头像。
-   */
-  function toggleAdminGender() {
-    // 先算新性别,再同步 myIdentity,最后翻转 adminGender;
-    // 避免"adminGender 已翻转但 myIdentity.avatar 仍是旧值"的中间态。
-    const newGender = adminGender.value === 'male' ? 'female' : 'male'
-    if (isAdminName(myIdentity.value.name)) {
-      myIdentity.value =
-        newGender === 'male'
-          ? { name: '管理员 (男)', avatar: MINE_AVATAR_URL }
-          : { name: '管理员 (女)', avatar: MINE_AVATAR_FEMALE_URL }
-    }
-    adminGender.value = newGender
-  }
-
   // ---- 会话创作 -----------------------------------------------------------
   /**
-   * 当前发送身份(name + avatar)
+   * 当前发送身份(name + avatar + customId)
    *
-   * 由 EditModePanel 的角色选择面板设置;
-   * 发送消息时决定消息 side(管理员 → mine,其他角色 → other)。
+   * 由 EditModePanel 底部"我的头像"角色选择面板设置;
+   * 发送消息时判定 side:与当前卡片"我方身份"精确一致 → mine,否则 → other。
+   * 切换对话 / 新建对话时同步为该卡的身份(底部选择可临时覆盖,切卡后归位)。
    */
-  const myIdentity = ref<{ name: string; avatar: string }>({
-    name: '管理员 (男)',
-    avatar: MINE_AVATAR_URL,
-  })
+  const myIdentity = ref<CardIdentity>({ ...DEFAULT_MY_IDENTITY })
 
   /**
    * 设置当前发送身份(EditModePanel 角色选择面板 / 数据导入 / 恢复调用)
    *
-   * 身份为管理员时同步全局性别(adminGender 独立于发送身份,但两者恰为管理员
-   * 时不得分裂:mine 头像按 adminGender 渲染,身份是"管理员 (女)"却显示男头像
-   * 属于状态不一致,曾在导入/恢复路径出现)。角色选择面板只允许当前性别对应的
-   * 管理员可选,故此同步不会与面板逻辑冲突。
-   *
-   * 管理员头像强制使用 store 内置 URL(MINE_AVATAR_URL /
-   * MINE_AVATAR_FEMALE_URL),忽略传入的 avatar 参数。导入旧版本数据时
-   * myIdentity.avatar 可能与当前内置 URL 不一致(文件名变更 / 路径迁移),
-   * 若直接使用会导致 myIdentity.avatar 与 mineAvatarUrl(adminGender 派生)
-   * 不同步。管理员头像是全局唯一的,强制覆盖最安全。
+   * 管理员身份强制使用 store 内置 URL(MINE_AVATAR_URL / MINE_AVATAR_FEMALE_URL),
+   * 忽略传入的 avatar 参数(导入旧版本数据时 myIdentity.avatar 可能与当前内置
+   * URL 不一致,强制覆盖最安全)。
    *
    * @param name   角色名
    * @param avatar 角色头像 URL(管理员身份时被忽略,改用内置 URL)
+   * @param customId 自定义角色 id(自定义角色身份时传入,与内置角色重名区分)
    */
-  function setMyIdentity(name: string, avatar: string) {
+  function setMyIdentity(name: string, avatar: string, customId?: string) {
     if (isAdminName(name)) {
       const adminAvatar = name === '管理员 (女)' ? MINE_AVATAR_FEMALE_URL : MINE_AVATAR_URL
       myIdentity.value = { name, avatar: adminAvatar }
-      adminGender.value = name === '管理员 (女)' ? 'female' : 'male'
     } else {
-      myIdentity.value = { name, avatar }
+      myIdentity.value = { name, avatar, customId }
     }
   }
+
+  /** 当前激活父卡的"我方身份"(缺失回退默认管理员·男) */
+  const activeCardIdentity = computed<CardIdentity>(() =>
+    identityOfCard(cards.value[activeCardIndex.value]),
+  )
+
+  /** 当前激活父卡的"我方身份"头像(聊天区右侧气泡 / 头像菜单高亮解析用) */
+  const activeCardIdentityAvatar = computed(() => activeCardIdentity.value.avatar)
 
   /**
    * 编辑模式:更换消息的说话人身份(头像选择菜单调用)
@@ -453,8 +675,9 @@ export const useChatStore = defineStore('chat', () => {
    * @param messageId 目标消息 id
    * @param name      新角色名
    * @param avatar    新角色头像 URL
+   * @param customId  新角色自定义 id(内置角色 undefined)
    */
-  function changeMessageIdentity(messageId: number, name: string, avatar: string) {
+  function changeMessageIdentity(messageId: number, name: string, avatar: string, customId?: string) {
     if (activeSub.value === null) return
     const conv = conversations.value[activeSub.value]
     const msgs = conv.messages
@@ -469,6 +692,7 @@ export const useChatStore = defineStore('chat', () => {
     for (let j = from; j <= to; j++) {
       msgs[j].speakerName = name
       msgs[j].speakerAvatar = avatar
+      msgs[j].speakerCustomId = customId
     }
   }
 
@@ -492,31 +716,49 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   /**
-   * 新建会话
+   * 是否可在当前父卡下直接追加子会话
    *
-   * 按当前选中状态分三种情况:
-   * - 选中了子对话 且 父级卡片展开:在该卡片下新建子会话
-   *   (群聊判定 = 该卡片下所有子对话成员的并集)
-   * - 选中了子对话 但 父级卡片折叠:新建独立父级"未命名会话"卡
-   * - 未选中任何对话:新建独立父级"未命名会话"卡
-   *
-   * 新卡/新子卡自动选中(空对话 play 被 playedCount >= length 拦截,不会误播)。
-   * 需要同步维护 collapsed / playedCounts(playCounts 初始化是快照,新增必须补齐)。
+   * 选中了子对话 且 父级卡片展开 时为 true:聊天按钮直接加子卡,不弹身份弹窗。
    */
-  function createConversation() {
-    // 情况 1:选中子对话 且 父级卡片展开 → 该卡片下追加子会话
-    if (activeSub.value !== null && !collapsed.value[activeCardIndex.value]) {
-      const card = cards.value[activeCardIndex.value]
-      card.conversations.push({ name: '未命名会话', messages: [] })
-      // playedCounts 按全局子卡索引对应,必须用 splice 在新子卡位置插入 0,
-      // 否则中间卡片追加子会话时后续子卡的 playedCounts 会错位。
-      const newSubIndex = cardSubStarts.value[activeCardIndex.value + 1] - 1
-      playedCounts.value.splice(newSubIndex, 0, 0)
-      activeSub.value = newSubIndex
-      return
-    }
-    // 情况 2/3:父级折叠或未选中 → 新建独立父级未命名会话
-    cards.value.push({ conversations: [{ name: '未命名会话', messages: [] }] })
+  const canAddChild = computed(() =>
+    activeSub.value !== null && !collapsed.value[activeCardIndex.value],
+  )
+
+  /**
+   * 新建会话——情况 1:在选中子对话所在父卡下追加子会话
+   *
+   * 群聊判定 = 该卡片下所有子对话成员的并集。新子卡自动选中
+   * (空对话 play 被 playedCount >= length 拦截,不会误播)。
+   * 需要同步维护 playedCounts(playCounts 初始化是快照,新增必须补齐)。
+   */
+  function createChildConversation() {
+    if (activeSub.value === null) return
+    const card = cards.value[activeCardIndex.value]
+    card.conversations.push({ name: '未命名会话', messages: [] })
+    // playedCounts 按全局子卡索引对应,必须用 splice 在新子卡位置插入 0,
+    // 否则中间卡片追加子会话时后续子卡的 playedCounts 会错位。
+    const newSubIndex = cardSubStarts.value[activeCardIndex.value + 1] - 1
+    playedCounts.value.splice(newSubIndex, 0, 0)
+    activeSub.value = newSubIndex
+  }
+
+  /**
+   * 新建会话——情况 2/3:新建独立父级"未命名会话"卡,并设置本卡"我方身份"
+   *
+   * identity 由创建弹窗(IdentityDialog)选择,**创建后不可修改**;
+   * 缺省(直接调用不传)回退默认管理员·男。
+   *
+   * @param identity 本卡"我方身份"(name/avatar/customId)
+   */
+  function createParentConversation(identity: CardIdentity = DEFAULT_MY_IDENTITY) {
+    cards.value.push({
+      conversations: [{ name: '未命名会话', messages: [] }],
+      myIdentity: {
+        name: identity.name,
+        avatar: identity.avatar,
+        ...(identity.customId ? { customId: identity.customId } : {}),
+      },
+    })
     collapsed.value.push(false)
     playedCounts.value.push(0)
     // 依赖 conversations 计算属性已同步求值(push 后立即访问 .value 触发 lazy 求值)
@@ -527,12 +769,11 @@ export const useChatStore = defineStore('chat', () => {
    * 发送一条消息(编辑模式底部面板调用)
    *
    * - 空输入静默不发送(trim 后为空直接返回)
-   * - 管理员身份 → mine(右侧);其他角色 → other(左侧)
+   * - side 判定:当前发送身份与卡片"我方身份"精确一致 → mine(右侧);否则 → other(左侧)
    * - asOption:以"玩家选择点"方式发送(mine + choices,播放时合并为选择面板);
    *   新消息的首个选项复用 insertChoice 统一插入逻辑(afterIndex=-1,label=输入文字)
-   *   ⚠ 选项消息固定以管理员身份(mine 侧)发出,不受当前 myIdentity 影响:
-   *   选项是"玩家选择点",播放时由玩家点击 → 以管理员身份发送选中文本。
-   *   管理员性别取自 adminGender(右上角工具栏切换的全局设置)。
+   *   ⚠ 选项消息固定以**卡片身份**(mine 侧)发出,与底部当前发送身份解耦:
+   *   选项是"玩家选择点",播放时由玩家点击 → 以卡片身份发送选中文本。
    *
    * @param text     输入框文本
    * @param asOption 是否作为选项发送
@@ -543,19 +784,18 @@ export const useChatStore = defineStore('chat', () => {
     if (!trimmed) return
     const conv = conversations.value[activeSub.value]
     const nextId = nextMessageId(conv)
-    // 选项消息强制走管理员身份(mine 侧),与当前 myIdentity 解耦:
-    // 即使当前发送身份是某个角色,选项仍归管理员
-    const useAdmin = asOption || isAdminName(myIdentity.value.name)
+    // 选项消息固定以卡片身份(mine 侧)发出,与 myIdentity 解耦:
+    // 即使当前发送身份是某个角色,选项仍是"玩家自己"的动作
+    const cardIdentity = activeCardIdentity.value
+    const isMe = asOption ? true : identityMatches(myIdentity.value, cardIdentity)
+    const speaker = isMe ? cardIdentity : myIdentity.value
     const msg: ChatMessage = {
       id: nextId,
-      side: useAdmin ? 'mine' : 'other',
+      side: isMe ? 'mine' : 'other',
       text: asOption ? '' : trimmed,
-      speakerName: useAdmin
-        ? (adminGender.value === 'female' ? '管理员 (女)' : '管理员 (男)')
-        : myIdentity.value.name,
-      speakerAvatar: useAdmin
-        ? (adminGender.value === 'female' ? MINE_AVATAR_FEMALE_URL : MINE_AVATAR_URL)
-        : myIdentity.value.avatar,
+      speakerName: speaker.name,
+      speakerAvatar: speaker.avatar,
+      speakerCustomId: speaker.customId,
     }
     if (asOption) {
       msg.choices = []
@@ -580,15 +820,19 @@ export const useChatStore = defineStore('chat', () => {
     if (activeSub.value === null) return
     const conv = conversations.value[activeSub.value]
     const nextId = nextMessageId(conv)
+    const cardIdentity = activeCardIdentity.value
+    const isMe = identityMatches(myIdentity.value, cardIdentity)
+    const speaker = isMe ? cardIdentity : myIdentity.value
     const msg: ChatMessage = {
       id: nextId,
-      side: isAdminName(myIdentity.value.name) ? 'mine' : 'other',
+      side: isMe ? 'mine' : 'other',
       text: '',
       image,
       imageW: width,
       imageH: height,
-      speakerName: myIdentity.value.name,
-      speakerAvatar: myIdentity.value.avatar,
+      speakerName: speaker.name,
+      speakerAvatar: speaker.avatar,
+      speakerCustomId: speaker.customId,
     }
     conv.messages.push(msg)
   }
@@ -695,6 +939,61 @@ export const useChatStore = defineStore('chat', () => {
     } else {
       conv.customTitle = trimmed
     }
+  }
+
+  /**
+   * 设置某张父级卡片的自定义群聊头像(编辑模式点击父卡头像的裁剪弹窗调用)
+   *
+   * 头像以 dataURL 存在卡片上,随卡片持久化 / 导入导出;
+   * 仅群聊(卡片级成员 ≥2)生效,私聊 / 未命名对话回退动态头像。
+   * avatar 传 undefined 表示清除自定义头像,回退默认群聊图。
+   *
+   * @param cardIndex 父级卡片索引
+   * @param avatar    自定义群聊头像 dataURL(undefined = 恢复默认)
+   * @param source    裁剪前的原始源图 dataURL(与 avatar 同步保存;
+   *                  再次打开弹窗预载入源图重新裁剪,避免只有裁好方的图)
+   */
+  function setCardGroupAvatar(cardIndex: number, avatar: string | undefined, source?: string) {
+    const card = cards.value[cardIndex]
+    if (!card) return
+    card.groupAvatar = avatar
+    // 有头像时同步记录源图(缺省回退头像本身);清除头像时一并清空源图
+    card.groupAvatarSource = avatar === undefined ? undefined : source ?? avatar
+  }
+
+  /**
+   * 读取某张父卡的角色显示名覆盖表(供渲染层按身份键查显示名)
+   *
+   * @param cardIndex 父级卡片索引
+   * @returns 覆盖表(未设置时为空对象)
+   */
+  function roleNamesOf(cardIndex: number): Record<string, string> {
+    return cards.value[cardIndex]?.roleNames ?? {}
+  }
+
+  /**
+   * 设置某张父卡下某角色的显示名(编辑模式点击气泡上方角色名小字调用)
+   *
+   * 仅写入卡片级覆盖表(card.roleNames),不改写消息原始 speakerName 数据;
+   * 显示名经 conversationMeta / resolveSpeakerName 渲染时替换,随卡片持久化 / 导入导出。
+   * 空串 / 全空白 = 删除该键,回退该角色原显示名;整表清空时字段置 undefined 保持数据干净。
+   *
+   * @param cardIndex  父级卡片索引
+   * @param key        角色身份键(roleNameKey / speakerNameKey 派生)
+   * @param displayName 新显示名(空串 = 恢复默认)
+   */
+  function setCardRoleName(cardIndex: number, key: string, displayName: string) {
+    const card = cards.value[cardIndex]
+    if (!card || !key) return
+    const trimmed = displayName.trim()
+    if (trimmed === '') {
+      if (!card.roleNames) return
+      delete card.roleNames[key]
+      if (Object.keys(card.roleNames).length === 0) card.roleNames = undefined
+      return
+    }
+    if (!card.roleNames) card.roleNames = {}
+    card.roleNames[key] = trimmed
   }
 
   /**
@@ -984,10 +1283,12 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   // 切换对话:先停止旧对话播放(无论是否已播完),再尝试播放新对话。
+  // 同时把底部"发送身份"同步为当前卡片的"我方身份"(底部选择可临时覆盖,切卡后归位)。
   // 编辑模式下不自动播放:仅展示全量消息供编辑,避免选中对话触发后台定时器
   // 序列(setLoading/advance 静默推进 playedCounts,且可能误设 pendingChoice)。
   watch(activeSub, (sub) => {
     stop()
+    if (sub !== null) myIdentity.value = { ...activeCardIdentity.value }
     if (sub !== null && !isEditMode.value) play(sub)
   }, { immediate: true })
 
@@ -1226,9 +1527,39 @@ export const useChatStore = defineStore('chat', () => {
     })
   }
 
+  /**
+   * 在指定消息之后插入一条"以该消息所属角色发言"的新消息(编辑模式加号按钮调用)
+   *
+   * 角色 = 悬停消息自身的说话人身份(side / speakerName / speakerAvatar /
+   * speakerCustomId 全部复制自源消息),因此新消息与源消息同侧同角色,
+   * 头像/性别解析完全一致。默认文本"新消息",插入后可点击气泡内联编辑。
+   *
+   * @param subIndex  子卡全局索引(扁平 conversations 下标)
+   * @param messageId 作为插入锚点的消息 id(新消息紧跟其后)
+   */
+  function insertMessageAfter(subIndex: number, messageId: number) {
+    const conv = conversations.value[subIndex]
+    if (!conv) return
+    const idx = conv.messages.findIndex((m) => m.id === messageId)
+    const src = idx === -1 ? undefined : conv.messages[idx]
+    if (!src) return
+    conv.messages.splice(idx + 1, 0, {
+      id: nextMessageId(conv),
+      side: src.side,
+      text: '新消息',
+      speakerName: src.speakerName,
+      speakerAvatar: src.speakerAvatar,
+      speakerCustomId: src.speakerCustomId,
+    })
+  }
+
   return {
     // 数据
     cards,
+    customCharacters,
+    addCustomCharacter,
+    removeCustomCharacter,
+    importCustomCharacters,
     conversations,
     collapsed,
     cardSubRanges,
@@ -1239,22 +1570,26 @@ export const useChatStore = defineStore('chat', () => {
     messages,
     counterpartName,
     currentOtherAvatarUrl,
-    mineAvatarUrl,
-    adminGender,
-    toggleAdminGender,
+    activeCardIdentity,
+    activeCardIdentityAvatar,
     cardCharacters,
     // 会话创作
     myIdentity,
     setMyIdentity,
+    canAddChild,
     changeMessageIdentity,
     addMessageAvatar,
-    createConversation,
+    createChildConversation,
+    createParentConversation,
     sendMessage,
     sendImage,
     sendCenteredMessage,
     sendPanelMessage,
     deleteActiveConversation,
     setCustomTitle,
+    setCardGroupAvatar,
+    setCardRoleName,
+    roleNamesOf,
     // 动态命名
     conversationMeta,
     currentConversationMeta,
@@ -1280,6 +1615,9 @@ export const useChatStore = defineStore('chat', () => {
     // 编辑模式
     isEditMode,
     toggleEditMode,
+    // 角色名称显示开关(localStorage 持久化)
+    showCharacterNames,
+    toggleShowCharacterNames,
     replaceAllCards,
     updateMessageText,
     updatePanelStyle,
@@ -1290,6 +1628,7 @@ export const useChatStore = defineStore('chat', () => {
     insertChoice,
     deleteMessage,
     duplicateCenteredMessage,
+    insertMessageAfter,
     // 公共头像解析(聊天区渲染 / 编辑菜单高亮共用)
     resolveMessageAvatar,
   }

@@ -41,6 +41,8 @@ import chatPanelIconAlt from '../assets/materials/activity_mission_icon_gray.web
 import chatPanelIconAlt2 from '../assets/materials/fac_mission_icon_gray.webp'
 import editModeToggle from '../assets/materials/deco_map_custom_mark_delete_write.webp'
 import editModeActive from '../assets/materials/icon_sns_chat_10.webp'
+// 编辑模式顶部"下载素材"按钮(icon_attackskillbig_down.png)
+import editBtnDownload from '../assets/materials/icon_attackskillbig_down.png'
 
 // 编辑模式常驻面板圆形按钮图标(从左到右)
 import editBtnTask from '../assets/materials/icon_decorate_task_1.webp'
@@ -50,8 +52,12 @@ import editBtnPotential from '../assets/materials/potential_picture.webp'
 import editBtnEmoticon from '../assets/materials/icon_sns_chat_emoticon.webp'
 import editBtnChat from '../assets/materials/icon_sns_chat_04.webp'
 import editBtnChat09 from '../assets/materials/icon_sns_chat_09.webp'
+import editBtnCharacter from '../assets/materials/btn_character.png'
 import editBtnDeleteIndeed from '../assets/materials/icon_tips_delete_indeed.webp'
 import editBtnUpgrade from '../assets/materials/icon_suffix_upgrade.webp'
+
+// 自定义角色:角色选择面板末尾的"添加"按钮
+import iconPlusmark from '../assets/materials/icon_plusmark.png'
 
 // 编辑模式右侧操作区:删除按钮下方的工具按钮图标(仅样式,无功能)
 import editBtnExport from '../assets/materials/icon_contingency_contract_apply_share.webp'
@@ -123,6 +129,8 @@ export const MATERIALS = {
   editModeToggle,
   // 编辑模式切换按钮(编辑态)
   editModeActive,
+  // 编辑模式顶部"下载素材"按钮
+  editBtnDownload,
   // 编辑模式常驻面板圆形按钮图标(从左到右)
   editBtnTask,
   editBtnEvents,
@@ -132,10 +140,14 @@ export const MATERIALS = {
   editBtnChat,
   // 编辑模式专属按钮图标(编辑切换按钮下方)
   editBtnChat09,
+  // 角色名称显示开关按钮(btn_character.png)
+  editBtnCharacter,
   // 删除对话按钮图标
   editBtnDeleteIndeed,
   // 自定义页面背景(上传图片)按钮图标
   editBtnUpgrade,
+  // 自定义角色:角色选择面板末尾的"添加"按钮(icon_plusmark.png)
+  iconPlusmark,
   // 编辑模式右侧工具按钮图标(删除按钮下方,仅样式)
   editBtnExport,
   editBtnShare,

@@ -30,9 +30,9 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { storeToRefs } from 'pinia'
 import { PANEL, panelTop as calcPanelTop } from '../../constants/panel'
 import { MATERIALS } from '../../constants/materials'
-import type { Character } from '../../constants/character'
+import type { CharacterSelection } from '../../constants/character'
 import { EMOJIS } from '../../constants/emoji'
-import { useChatStore } from '../../stores/chat'
+import { roleNameKey, useChatStore } from '../../stores/chat'
 import EditComposer from './EditComposer.vue'
 import CharacterPicker from './CharacterPicker.vue'
 import PanelTopMask from './PanelTopMask.vue'
@@ -95,14 +95,14 @@ type PopKind = 'character' | 'emoticon'
 const popKind = ref<PopKind | null>(null)
 
 const chatStore = useChatStore()
-const { myIdentity, mineAvatarUrl } = storeToRefs(chatStore)
+const { myIdentity } = storeToRefs(chatStore)
 
 /**
  * 消息头像更换目标:被点击头像的消息 id(null = 未选中)
  *
  * 由 ChatArea 在点击消息头像时传入,面板的角色弹窗此时为"更换该消息身份"服务;
  * 为 null 时仍走原逻辑(点击面板头像按钮,更新"我"的发送身份)。
- * 管理员(mine 侧)头像不可更换,ChatArea 不会为其设置目标。
+ * 本卡"我方身份"(mine 侧)头像不可更换,ChatArea 不会为其设置目标。
  */
 const props = defineProps<{
   avatarTarget: number | null
@@ -111,6 +111,8 @@ const props = defineProps<{
 const emit = defineEmits<{
   /** 更换目标消息身份完成后通知父组件(父组件清空目标) */
   (e: 'avatar-target-used'): void
+  /** 点击角色面板末尾 ＋按钮:请求打开"添加自定义角色"弹窗(上抛到 App) */
+  (e: 'open-custom-character'): void
 }>()
 
 /**
@@ -119,6 +121,7 @@ const emit = defineEmits<{
  * - 无 avatarTarget:`我`的发送身份头像
  *
  * 解析逻辑与 ChatArea 共用 chatStore.resolveMessageAvatar,保证一致。
+ * mine 侧默认头像 = 当前父卡"我方身份"头像。
  */
 const selectedAvatar = computed(() => {
   if (props.avatarTarget == null || chatStore.activeSub === null) {
@@ -131,8 +134,21 @@ const selectedAvatar = computed(() => {
     msg,
     conv?.name ?? '',
     chatStore.currentOtherAvatarUrl,
-    chatStore.mineAvatarUrl,
+    chatStore.activeCardIdentityAvatar,
   )
+})
+
+/**
+ * 更换他人消息身份时,弹窗内禁用的身份键 = 本卡"我方身份"
+ *
+ * "我"是聊天区不可替换的固定身份,头像菜单里不提供再选回"我"的入口
+ * (角色网格中本卡身份头像置灰)。底部发送身份选择(avatarTarget 为空)
+ * 不受限制,可自由设回任何身份。
+ */
+const disabledIdentityKey = computed(() => {
+  if (props.avatarTarget == null) return undefined
+  const identity = chatStore.activeCardIdentity
+  return roleNameKey(identity.name, identity.customId)
 })
 
 /** 弹出面板高度:表情弹窗按内容,角色弹窗固定 430 */
@@ -203,16 +219,26 @@ onBeforeUnmount(() => document.removeEventListener('pointerdown', onDocPointerDo
  * - avatarTarget 存在:把该消息身份换成选中角色,选完自动关闭弹窗
  * - avatarTarget 为空:更新"我"的发送身份(弹窗保持展开,可连续查看选择)
  *
- * @param c 选中的干员
+ * @param c 选中的角色(自定义角色带 customId,与内置重名时靠它区分)
  */
-function selectCharacter(c: Character) {
+function selectCharacter(c: CharacterSelection) {
   if (props.avatarTarget != null) {
-    chatStore.changeMessageIdentity(props.avatarTarget, c.name, c.avatar)
+    chatStore.changeMessageIdentity(props.avatarTarget, c.name, c.avatar, c.customId)
     emit('avatar-target-used')
     popKind.value = null
   } else {
-    chatStore.setMyIdentity(c.name, c.avatar)
+    chatStore.setMyIdentity(c.name, c.avatar, c.customId)
   }
+}
+
+/** 删除自定义角色(格内 ×);已引用该角色的消息仍保留各自头像 */
+function removeCustomCharacter(id: string) {
+  chatStore.removeCustomCharacter(id)
+}
+
+/** 点击 ＋ 新增自定义角色:上抛给 App 打开弹窗 */
+function openCustomCharacterDialog() {
+  emit('open-custom-character')
 }
 
 /**
@@ -236,15 +262,8 @@ defineExpose({
        完全一致,由 PanelTopMask / PanelShell 共享渲染 -->
   <PanelTopMask :top="panelTop" />
   <PanelShell :height="PANEL_H" :top="panelTop" class="edit-panel">
-    <!-- 管理员性别切换按钮:点击全局切换管理员男/女 -->
-    <button
-      class="edit-panel__avatar"
-      type="button"
-      aria-label="切换管理员性别"
-      @click="chatStore.toggleAdminGender()"
-    >
-      <img class="edit-panel__avatar-img" :src="mineAvatarUrl" alt="" />
-    </button>
+    <!-- 我方发送身份头像按钮:点击弹出角色选择面板(无全局管理员性别切换,
+         性别由身份本身承载——管理员(男)/(女)就是网格里两个选项) -->
     <button
       class="edit-panel__avatar"
       type="button"
@@ -282,13 +301,16 @@ defineExpose({
         <!-- 背景装饰:左上角 + 右下角两张,原始尺寸原样贴角 -->
         <img class="edit-pop__bg edit-pop__bg--tl" :src="MATERIALS.editPopDecoTl" alt="" />
         <img class="edit-pop__bg edit-pop__bg--br" :src="MATERIALS.editPopDecoBr" alt="" />
-        <!-- 角色头像选择(子组件):全部干员每行 12 个,可滚动;
-             更换他人消息身份(avatarTarget 存在)时,管理员(男/女)置灰禁用 -->
+        <!-- 角色头像选择(子组件):自定义角色最前 → 全部干员每行 12 个 → 末尾 ＋;
+             更换他人消息身份(avatarTarget 存在)时,本卡"我方身份"置灰禁用 -->
         <CharacterPicker
           v-if="popKind === 'character'"
           :avatar-target="avatarTarget"
           :selected-avatar="selectedAvatar"
+          :disabled-identity-key="disabledIdentityKey"
           @select="selectCharacter"
+          @remove="removeCustomCharacter"
+          @add-custom="openCustomCharacterDialog"
         />
         <!-- 表情选择:37 个表情每行 16 个,可滚动;点击在输入框光标处插入 -->
         <div v-if="popKind === 'emoticon'" class="edit-pop__emoji-grid">

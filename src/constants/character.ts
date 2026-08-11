@@ -17,6 +17,14 @@
 /** 性别字面量类型 */
 export type CharacterGender = 'male' | 'female'
 
+/**
+ * 称呼代词(他/她/它)
+ *
+ * 内置角色只有 male/female;自定义角色额外允许 'it'(无生命物/其它),
+ * 用于子卡预览文案「和它聊聊 / 和它们聊聊」的判定。
+ */
+export type PronounGender = CharacterGender | 'it'
+
 /** 干员数据结构 */
 export interface Character {
   /** 角色名 */
@@ -25,6 +33,48 @@ export interface Character {
   avatar: string
   /** 性别(占位,待校正) */
   gender: CharacterGender
+}
+
+/**
+ * 自定义角色数据
+ *
+ * - id    : 唯一标识(crypto.randomUUID),与内置角色重名时的区分依据
+ * - name  : 显示名(可与内置角色重名)
+ * - avatar: 用户裁剪后的方形 data URL(512×512)
+ * - gender: 他/她/它(决定子卡预览称呼)
+ */
+export interface CustomCharacter {
+  /** 唯一标识(绝不与内置角色冲突) */
+  id: string
+  /** 显示名(可与内置角色重名) */
+  name: string
+  /** 方形头像 data URL */
+  avatar: string
+  /** 称呼代词(他/她/它) */
+  gender: PronounGender
+}
+
+/**
+ * 角色选择面板的选中载荷(内置与自定义统一)
+ *
+ * 自定义角色带 customId,内置角色不带(靠名字指向静态表)。
+ */
+export interface CharacterSelection {
+  name: string
+  avatar: string
+  gender: PronounGender
+  customId?: string
+}
+
+/**
+ * 是否"自定义"头像(data URL)
+ *
+ * 用户上传裁剪的自定义头像一律是 data:image/… URL。渲染侧据此跳过
+ * cover + scale(1.4/1.1) 的二次裁剪——自定义头像已是用户裁好的方图,
+ * 再放大收紧会切掉脸。
+ */
+export function isCustomAvatar(url: string): boolean {
+  return url.startsWith('data:image/')
 }
 
 /**

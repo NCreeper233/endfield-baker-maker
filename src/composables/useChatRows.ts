@@ -16,7 +16,7 @@
 
 import { computed, watch, type Ref } from 'vue'
 import { storeToRefs } from 'pinia'
-import { useChatStore } from '../stores/chat'
+import { adminDisplayName, isAdminName, speakerNameKey, useChatStore } from '../stores/chat'
 import {
   AVATAR_TOP_TO_BUBBLE,
   CHAT,
@@ -118,7 +118,8 @@ export function useChatRows(options: ChatRowsOptions) {
 
   /** 当前对话的对方/我方默认头像 URL(群聊 per-message 可覆盖) */
   const otherAvatarUrl = computed(() => chatStore.currentOtherAvatarUrl)
-  const mineAvatarUrl = computed(() => chatStore.mineAvatarUrl)
+  /** 我方默认头像 = 当前父卡"我方身份"的头像(聊天区右侧气泡默认头像) */
+  const mineAvatarUrl = computed(() => chatStore.activeCardIdentityAvatar)
 
   /**
    * 解析单条消息的说话人头像 URL(支持群聊 per-message 覆盖)
@@ -133,6 +134,33 @@ export function useChatRows(options: ChatRowsOptions) {
       otherAvatarUrl.value,
       mineAvatarUrl.value,
     )
+  }
+
+  /**
+   * 单条消息的说话人显示名(角色名称悬浮气泡用)
+   *
+   * 与 resolveSpeakerAvatar 同源解析(键一致,头像换人即换名):
+   * - other 侧:显式 speakerName(群聊 per-message),否则回退会话名
+   * - mine 侧:显式 speakerName(发送时写入的身份),否则回退当前发送身份名
+   * - 最后应用当前父卡的卡片级显示名覆盖(card.roleNames,仅影响显示,
+   *   不改写消息数据;气泡名 / LoadingBubble 名 / 导出离屏渲染共用此函数)
+   */
+  function resolveSpeakerName(msg: MessageSpeaker): string {
+    const identity = chatStore.activeCardIdentity
+    let base: string
+    if (msg.side === 'mine') {
+      // mine 侧显式 speakerName(发送时写入的身份)优先;缺省回退本卡"我方身份"
+      // 的显示名(身份是管理员时归一化"管理员",不随性别全名变化)。
+      const name = msg.speakerName
+      base = name && !isAdminName(name) ? name : (isAdminName(identity.name) ? '管理员' : identity.name)
+    } else {
+      // other 侧:显式 speakerName(群聊 per-message),否则回退会话名;
+      // 管理员(男/女)统一显示"管理员"(数据内部保留性别全名)
+      base = adminDisplayName(msg.speakerName ?? activeConvName.value)
+    }
+    const card = chatStore.cards[chatStore.activeCardIndex]
+    const overlay = card?.roleNames?.[speakerNameKey(msg, activeConvName.value, identity)]
+    return overlay ?? base
   }
 
   /**
@@ -377,7 +405,6 @@ export function useChatRows(options: ChatRowsOptions) {
 
     const loadSvgW = bubbleSvgWidth(LOADING_RECT.w, side)
     const left = side === 'other' ? CHAT.otherBubbleX : CHAT.mineBubbleRight - loadSvgW
-
     let bubbleTop: number
     if (lastRow.value) {
       // 用 lastRow.box(已缓存),避免重复 measure 触发重排
@@ -421,12 +448,14 @@ export function useChatRows(options: ChatRowsOptions) {
     return {
       left,
       top: bubbleTop,
+      loadW: loadSvgW,
       loadH,
       avatarTop,
       avatarX,
       stack: avatarStack(avatarX, avatarTop),
       side,
       portraitUrl,
+      speakerName: next ? resolveSpeakerName(next) : '',
       speakerKey: next ? speakerKeyOf(next) : null,
     }
   })
@@ -474,6 +503,7 @@ export function useChatRows(options: ChatRowsOptions) {
     choicePanelReserve,
     chatScrollHeight,
     resolveSpeakerAvatar,
+    resolveSpeakerName,
     activeConvName,
   }
 }

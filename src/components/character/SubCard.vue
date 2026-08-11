@@ -12,9 +12,8 @@
 // =============================================================================
 import { computed } from 'vue'
 import { storeToRefs } from 'pinia'
-import { useChatStore } from '../../stores/chat'
+import { useChatStore, genderOfRef } from '../../stores/chat'
 import { MATERIALS } from '../../constants/materials'
-import { findCharacter } from '../../constants/character'
 import { emojiToHtml } from '../../constants/emoji'
 
 const props = defineProps<{
@@ -49,9 +48,10 @@ const counterpartMembers = computed(() => chatStore.conversationMeta[props.subIn
  * - 播放模式:
  *   - 未播放(playedCount=0):
  *     - 未命名对话(无成员):"和TA聊聊"
- *     - 私聊(1 个成员):"和他/她聊聊"(按对方性别,查不到默认"她")
+ *     - 私聊(1 个成员):"和他/她/它聊聊"(按成员引用性别,查不到默认"她")
  *     - 群聊(≥2 个成员,已排除管理员):
- *         全部为女性 → "和她们聊聊";否则(全男/男女混合)→ "和他们聊聊"
+ *         全部为"它" → "和它们聊聊";否则沿用原规则
+ *         (全部为女性 → "和她们聊聊";其余(全男/男女混合/含未知)→ "和他们聊聊")
  *   - 播放中 / 播放完:返回最近一条已播放消息文本
  * 超长由 CSS ellipsis 截断为 "..."。
  */
@@ -64,11 +64,14 @@ const previewText = computed(() => {
   if (played <= 0) {
     const members = counterpartMembers.value
     if (members.length === 0) return '和TA聊聊'
+    const genders = members.map((m) => genderOfRef(m, chatStore.customCharacters))
     if (members.length === 1) {
-      const c = findCharacter(members[0])
-      return c?.gender === 'male' ? '和他聊聊' : '和她聊聊'
+      const g = genders[0]
+      return g === 'male' ? '和他聊聊' : g === 'it' ? '和它聊聊' : '和她聊聊'
     }
-    const allFemale = members.every((n) => findCharacter(n)?.gender === 'female')
+    // 群聊:全部为"它" → "和它们聊聊";否则按既有判定(全女 → 她们,其余 → 他们)
+    if (genders.every((g) => g === 'it')) return '和它们聊聊'
+    const allFemale = genders.every((g) => g === 'female')
     return allFemale ? '和她们聊聊' : '和他们聊聊'
   }
   return chatStore.subPreviewTexts[props.subIndex] ?? ''

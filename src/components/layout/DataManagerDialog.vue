@@ -12,11 +12,12 @@
 import { computed, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useChatStore } from '../../stores/chat'
-import { INITIAL_CARDS } from '../../constants/initialCards'
+import { createInitialCards } from '../../constants/initialCards'
 import { MATERIALS } from '../../constants/materials'
 import {
   downloadProject,
   deserializeProject,
+  flushPendingWrites,
   EXPORT_FILE_EXT,
   type ProjectPayload,
 } from '../../composables/useChatPersistence'
@@ -32,7 +33,7 @@ const emit = defineEmits<{
 }>()
 
 const chatStore = useChatStore()
-const { cards, myIdentity, adminGender } = storeToRefs(chatStore)
+const { cards, myIdentity, customCharacters } = storeToRefs(chatStore)
 
 /** 数据统计(卡片 / 对话 / 消息 / 序列化大小) */
 const stats = computed(() => {
@@ -41,7 +42,11 @@ const stats = computed(() => {
     (n, c) => n + c.conversations.reduce((m, cv) => m + cv.messages.length, 0),
     0,
   )
-  const sizeKB = JSON.stringify({ cards: cards.value, myIdentity: myIdentity.value }).length / 1024
+  const sizeKB = JSON.stringify({
+    cards: cards.value,
+    myIdentity: myIdentity.value,
+    customCharacters: customCharacters.value,
+  }).length / 1024
   return { cardCount: cards.value.length, convCount, msgCount, sizeKB: sizeKB.toFixed(1) }
 })
 
@@ -76,7 +81,7 @@ watch(
 )
 
 function onExport() {
-  downloadProject(cards.value, myIdentity.value, adminGender.value)
+  downloadProject(cards.value, myIdentity.value, customCharacters.value)
 }
 
 function onRequestClear() {
@@ -114,16 +119,20 @@ function applyCards(next: Card[]) {
 
 function onConfirm() {
   if (confirmKind.value === 'clear') {
-    applyCards(INITIAL_CARDS)
+    // 用工厂产出的**全新副本**重置为空工程(绝不直接引用 INITIAL_CARDS 常量:
+    // store 原地增删会污染常量,复用会导致"清空后还回脏数据")。
+    applyCards(createInitialCards())
+    flushPendingWrites()
     emit('close')
   } else if (confirmKind.value === 'import' && pendingImport.value) {
     const payload = pendingImport.value
     applyCards(payload.cards)
-    // 先恢复文件记录的 adminGender,再 setMyIdentity:管理员名称会
-    // 覆盖性别(身份优先,保证"管理员名 ↔ 性别"一致,避免
-    // "管理员 (女) 身份却显示男头像"的分裂);角色身份不受影响。
-    chatStore.adminGender = payload.adminGender
-    chatStore.setMyIdentity(payload.myIdentity.name, payload.myIdentity.avatar)
+    // 自定义角色注册表随工程整体替换(全局生效,刷新/导入后面板同步)
+    chatStore.importCustomCharacters(payload.customCharacters ?? [])
+    // 恢复全局"发送身份"(每张卡的"我方身份"已随 payload.cards 一起替换)
+    chatStore.setMyIdentity(payload.myIdentity.name, payload.myIdentity.avatar, payload.myIdentity.customId)
+    // 立即冲刷防抖落库:确保导入结果立即可持久(不依赖 300ms 防抖窗口后异步写)
+    flushPendingWrites()
     emit('close')
   }
 }

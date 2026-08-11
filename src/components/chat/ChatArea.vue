@@ -24,7 +24,7 @@
 // =============================================================================
 import { computed, inject, nextTick, onMounted, ref, watch, type Ref } from 'vue'
 import { storeToRefs } from 'pinia'
-import { useChatStore } from '../../stores/chat'
+import { speakerNameKey, useChatStore } from '../../stores/chat'
 import { useBubbleMeasure } from '../../composables/useBubbleMeasure'
 import { useAutoPlay } from '../../composables/useAutoPlay'
 import { useChatRows } from '../../composables/useChatRows'
@@ -42,6 +42,7 @@ import { CHARACTER_LIST_TOP, TOP_PAD } from '../../constants/characterCard'
 import { MATERIALS } from '../../constants/materials'
 import {
   pos,
+  speakerNameStyle,
   type BoxStyle,
 } from '../../utils/chatPosition'
 import type { ChatRow } from '../../types/chat'
@@ -64,6 +65,11 @@ const chatStore = useChatStore()
  */
 const props = defineProps<{
   exportMode?: boolean
+}>()
+
+const emit = defineEmits<{
+  /** 角色面板点击 ＋:请求打开"添加自定义角色"弹窗(上抛到 App) */
+  (e: 'open-custom-character'): void
 }>()
 
 /** 导出模式下聊天框高度(px):由 ChatExportStage 测量注入,未注入时用设计稿固定高 */
@@ -95,6 +101,7 @@ const {
   subPlayedFlags,
   pendingChoice,
   isEditMode,
+  showCharacterNames,
 } = storeToRefs(chatStore)
 // 测量方式与屏幕态统一(natural:false),避免 measureBubble(屏幕)与
 // measureBubbleNatural(导出)的 innerW 差异(canvas 估算偏大 → 屏幕气泡内宽
@@ -139,6 +146,7 @@ const {
   chatScrollHeight,
   choicePanelReserve,
   resolveSpeakerAvatar,
+  resolveSpeakerName,
 } = useChatRows({
   measure,
   measureCentered,
@@ -193,6 +201,17 @@ function onMessageAvatarClick(row: ChatRow) {
 function onAddAvatar(row: ChatRow) {
   if (!isEditMode.value || row.msg.side === 'mine') return
   chatStore.addMessageAvatar(row.msg.id)
+}
+
+/**
+ * 编辑模式:在带头像的消息之后插入一条"以该消息所属角色发言"的新消息
+ *
+ * 角色/侧别直接复制源消息(side + speakerName/Avatar/CustomId),
+ * 默认文本"新消息",插入后可点击气泡内联编辑。
+ */
+function onInsertAfter(row: ChatRow) {
+  if (!isEditMode.value || chatStore.activeSub === null) return
+  chatStore.insertMessageAfter(chatStore.activeSub, row.msg.id)
 }
 
 /**
@@ -467,6 +486,23 @@ function onDuplicateCentered(row: ChatRow) {
   chatStore.duplicateCenteredMessage(chatStore.activeSub, row.msg.id)
 }
 
+/**
+ * 角色名内联编辑提交:写入当前父卡的卡片级显示名覆盖
+ *
+ * 身份键由消息派生(speakerNameKey:mine 按本卡"我方身份"派生,管理员男/女 →
+ * 'admin:male'/'admin:female',other 取 speakerCustomId / speakerName / 会话名);
+ * 空名由 store 侧视为"恢复默认显示名"。
+ */
+function onNameUpdate(row: ChatRow, name: string) {
+  if (chatStore.activeSub === null) return
+  const convName = chatStore.conversations[chatStore.activeSub]?.name ?? ''
+  chatStore.setCardRoleName(
+    chatStore.activeCardIndex,
+    speakerNameKey(row.msg, convName, chatStore.activeCardIdentity),
+    name,
+  )
+}
+
 /** 当前对话是否已播放完毕(未选中时为 false) */
 const isConversationFinished = computed(() =>
   chatStore.activeSub === null ? false : subPlayedFlags.value[chatStore.activeSub],
@@ -715,10 +751,13 @@ const decoTop = computed(() => {
         :export-mode="exportMode"
         :hover-id="hoverId"
         :resolve-speaker-avatar="resolveSpeakerAvatar"
+        :resolve-speaker-name="resolveSpeakerName"
+        :show-character-names="showCharacterNames"
         @hover="onMsgHover"
         @leave="onMsgLeave"
         @avatar-click="onMessageAvatarClick"
         @add-avatar="onAddAvatar"
+        @insert-after="onInsertAfter"
         @text-input="onTextInput"
         @message-update="onMessageUpdate"
         @choice-update="onChoiceUpdate"
@@ -727,6 +766,7 @@ const decoTop = computed(() => {
         @panel-style-update="onPanelStyleUpdate"
         @delete="onDeleteMessage"
         @duplicate="onDuplicateCentered"
+        @name-update="onNameUpdate"
       />
 
       <!-- 自动播放加载占位(编辑模式不显示) -->
@@ -740,6 +780,12 @@ const decoTop = computed(() => {
           :portrait-url="loadingLayout.portraitUrl"
           :style="pos(loadingLayout.avatarX - CHAT_SCROLL.x, loadingLayout.avatarTop - CHAT_SCROLL.y, CHAT.avatarBox, CHAT.avatarBox)"
         />
+        <!-- 角色名称悬浮:加载气泡上方也显示下一条消息的说话人名(与真实气泡位置一致) -->
+        <span
+          v-if="showLoadingAvatar && showCharacterNames"
+          class="chat-speaker-name"
+          :style="speakerNameStyle(loadingLayout.side, loadingLayout.left - CHAT_SCROLL.x, loadingLayout.left - CHAT_SCROLL.x + loadingLayout.loadW, loadingLayout.top - CHAT_SCROLL.y)"
+        >{{ loadingLayout.speakerName }}</span>
         <LoadingBubble
           :side="loadingLayout.side"
           :left="loadingLayout.left - CHAT_SCROLL.x"
@@ -778,6 +824,7 @@ const decoTop = computed(() => {
       v-if="!exportMode && isEditMode && chatStore.activeSub !== null"
       :avatar-target="avatarTargetMsgId"
       @avatar-target-used="clearAvatarTarget()"
+      @open-custom-character="emit('open-custom-character')"
     />
   </section>
 </template>
@@ -798,13 +845,13 @@ const decoTop = computed(() => {
   scrollbar-width: thin;
   scrollbar-color: $color-scrollbar-chat transparent;
   animation: chat-in 0.3s ease;
-  // 顶部 40-80px 渐隐 + 底部 40-80px 渐隐 + 右侧 14px 渐隐
-  @include scroll-mask(40px, 80px, calc(100% - 80px), calc(100% - 40px), 14px);
+  // 顶部 20-40px 渐隐 + 底部 40-80px 渐隐 + 右侧 14px 渐隐
+  @include scroll-mask(20px, 40px, calc(100% - 80px), calc(100% - 40px), 14px);
 
   // 出现选项面板时:chat-scroll 高度减少 CHOICE_PANEL_RESERVE,底部羽化同步上移
   // (上移量 = reserve,经 --choice-reserve 注入,与 chatScrollHeight 保持一致)
   &--with-choice {
-    @include scroll-mask(40px, 80px, calc(100% - 80px + var(--choice-reserve)), calc(100% - 40px + var(--choice-reserve)), 14px);
+    @include scroll-mask(20px, 40px, calc(100% - 80px + var(--choice-reserve)), calc(100% - 40px + var(--choice-reserve)), 14px);
   }
 
   // 导出模式:滚动区展开到内容高度(高度由内联样式给 auto),

@@ -79,6 +79,13 @@ export interface ChatMessage {
    */
   speakerAvatar?: string
   /**
+   * 自定义角色 id(自定义角色说话人用)
+   *
+   * 与内置角色**重名**时靠它区分:头像解析 / 成员推导 / 会话级派生头像
+   * 均优先按 id 查自定义角色注册表,而非按名字查内置表。
+   */
+  speakerCustomId?: string
+  /**
    * 玩家选择项(仅 side='mine' 时有意义)
    *
    * - 提供:自动播放到此消息暂停,弹出选择面板,玩家点击后发送选项文本
@@ -122,8 +129,14 @@ export interface PanelStyle {
  *
  * 收敛自消息的 side + speakerName/speakerAvatar 三元组,
  * 供 store 解析链 / useChatRows / ChatMessageRow 共用同一形状。
+ *
+ * id 为可选:匿名说话人(speakerName 空串)按消息 id 独立成角色键
+ * ('anonymous:<id>'),使改名只作用于单条匿名消息,不波及其余匿名者。
  */
-export type MessageSpeaker = Pick<ChatMessage, 'side' | 'speakerAvatar' | 'speakerName'>
+export type MessageSpeaker = Pick<
+  ChatMessage,
+  'side' | 'speakerAvatar' | 'speakerName' | 'speakerCustomId'
+> & { id?: number }
 
 /** 对话数据:一个干员子卡对应一段对话 */
 export interface Conversation {
@@ -141,6 +154,22 @@ export interface Conversation {
 }
 
 /**
+ * 父级卡片"我方身份"
+ *
+ * 创建该父卡(一级卡片)时由 IdentityDialog 弹窗设置,只对该卡片生效:
+ * - 该卡及其所有子对话中,"我方"(side='mine')消息以此身份发出
+ *   (精确匹配 name + customId 判定,不用 roleNameKey——管理员(男/女)
+ *   虽各占独立键但显示名相同"管理员",按键无法区分性别)
+ * - 管理员及其他角色均成为"对方"侧
+ * 创建后不可修改。缺失时回退默认:管理员 (男)。
+ */
+export interface CardIdentity {
+  name: string
+  avatar: string
+  customId?: string
+}
+
+/**
  * 主卡(一级卡片)
  *
  * 一张主卡下挂载任意数量(≥1)的子卡(Conversation)。
@@ -149,6 +178,36 @@ export interface Conversation {
 export interface Card {
   /** 该主卡下的子卡对话列表(长度 ≥ 1) */
   conversations: Conversation[]
+  /**
+   * 自定义群聊头像(dataURL)
+   *
+   * 群聊(卡片级成员 ≥2)时覆盖默认群聊图;私聊 / 未命名对话不使用。
+   * 缺失(undefined)时回退默认群聊头像。由编辑模式点击父卡头像打开
+   * 裁剪弹窗设置,随卡片一起持久化 / 导入导出。
+   */
+  groupAvatar?: string
+  /**
+   * 自定义群聊头像的原始源图(dataURL,裁剪前)
+   *
+   * 保存时同步记录,再次打开弹窗时预载入它重新裁剪——否则预载入的是
+   * 已裁好的正方形,原始内容(框外部分)会永久丢失,无法再调整。
+   * 缺失(旧数据)时回退用 groupAvatar 本身预载入。
+   */
+  groupAvatarSource?: string
+  /**
+   * 卡片级角色显示名覆盖表:角色身份键 → 显示名
+   *
+   * 仅影响显示,不改写消息原始 speakerName 数据。键由 roleNameKey / memberNameKey /
+   * speakerNameKey 派生(custom:${id} / admin / builtin:${name}),每张父卡独立。
+   * 编辑模式下点击气泡上方角色名小字写入;空名提交删除对应键(回退原显示名)。
+   */
+  roleNames?: Record<string, string>
+  /**
+   * 本父卡的"我方身份"(创建时弹窗设置,只对该卡生效)
+   *
+   * 缺失(旧数据 / 未设置)时回退默认"管理员 (男)"。
+   */
+  myIdentity?: CardIdentity
 }
 
 /** 过渡起始尺寸(px):文字气泡从加载气泡尺寸平滑过渡到自身尺寸 */

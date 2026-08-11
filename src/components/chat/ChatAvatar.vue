@@ -10,6 +10,7 @@
 // =============================================================================
 import { computed } from 'vue'
 import { MATERIALS } from '../../constants/materials'
+import { isCustomAvatar } from '../../constants/character'
 import type { AvatarStack } from '../../constants/design'
 import type { MessageSide } from '../../types/chat'
 
@@ -85,6 +86,14 @@ const NPC_AVATAR_KEYS = ['icon_sns_npc_single_a', 'icon_sns_npc_channel_a']
 const isNpcPortrait = computed(() =>
   !!props.portraitUrl && NPC_AVATAR_KEYS.some((k) => props.portraitUrl.includes(k)),
 )
+
+/**
+ * 是否自定义角色头像(data URL)
+ *
+ * 自定义头像是用户已裁剪好的方形图,不能再被 cover + scale(1.4) 二次裁切,
+ * 否则会切掉脸。居中完整显示。
+ */
+const isCustomPortrait = computed(() => isCustomAvatar(props.portraitUrl))
 </script>
 
 <template>
@@ -95,7 +104,10 @@ const isNpcPortrait = computed(() =>
     <div class="chat-avatar__portrait-wrap" :style="portraitStyle">
       <img
         class="chat-avatar__portrait"
-        :class="{ 'chat-avatar__portrait--npc': isNpcPortrait }"
+        :class="{
+          'chat-avatar__portrait--npc': isNpcPortrait,
+          'chat-avatar__portrait--custom': isCustomPortrait,
+        }"
         :src="portraitUrl"
         alt=""
       />
@@ -145,6 +157,14 @@ const isNpcPortrait = computed(() =>
     object-fit: contain;
     object-position: center center;
     // NPC 用 contain 完整显示,不需要 scale 放大
+    transform: none;
+  }
+
+  // 自定义角色头像(data URL,用户已裁好的方形图):
+  // 与 NPC 同理完整显示(居中、不二次裁切),保持方形不拉伸
+  &__portrait--custom {
+    object-fit: cover;
+    object-position: center center;
     transform: none;
   }
 

@@ -11,6 +11,24 @@
 
 @use 'base';
 @use 'transitions';
+@use 'variables' as *;
+
+// -----------------------------------------------------------------------------
+// 角色名称悬浮(带头像消息的气泡上方,小号灰字)
+// -----------------------------------------------------------------------------
+// ChatMessageRow 与 ChatArea(LoadingBubble 头像)共用,scoped 无法跨组件,
+// 故定义在全局。行高须与 utils/chatPosition.SPEAKER_NAME_LINE(15) 保持一致。
+.chat-speaker-name {
+  position: absolute;
+  z-index: 1;
+  font-family: $font-harmony;
+  font-size: 15px;
+  line-height: 15px;
+  color: $color-speaker-name;
+  white-space: nowrap;
+  pointer-events: none;
+  user-select: none;
+}
 
 // -----------------------------------------------------------------------------
 // 表情图(全局样式,非 scoped)

@@ -3,11 +3,11 @@
 // 单条消息行(播放/编辑模式共用)
 // -----------------------------------------------------------------------------
 // 职责:渲染一条 ChatRow 的完整消息(头像/文字气泡/图片/居中文本/选项列表/
-//       删除按钮/补头像按钮/删除触发区),全部定位样式由父级注入的 row 计算。
+//       删除按钮/补头像按钮/插入按钮/删除触发区),全部定位样式由父级注入的 row 计算。
 // 设计理由:从 ChatArea 消息循环中抽出,模板行数减负;所有交互以 emit 上报,
 //          父组件统一处理 hover 缓存 / store 写入。
 // =============================================================================
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { CHAT, CHAT_SCROLL } from '../../constants/design'
 import { MATERIALS } from '../../constants/materials'
 import {
@@ -15,6 +15,7 @@ import {
   delBtnStyle,
   delBtnHotZoneStyle,
   addBtnStyle,
+  speakerNameStyle,
 } from '../../utils/chatPosition'
 import type { ChatRow, MessageSpeaker } from '../../types/chat'
 import ChatAvatar from './ChatAvatar.vue'
@@ -25,6 +26,9 @@ import EditChoiceList from './EditChoiceList.vue'
 
 /** 头像解析函数(由父级传入,与 store/菜单解析链一致) */
 type SpeakerAvatarResolver = (msg: MessageSpeaker) => string
+
+/** 说话人显示名解析函数(角色名称悬浮用) */
+type SpeakerNameResolver = (msg: MessageSpeaker) => string
 
 const props = defineProps<{
   /** 消息行布局结果(rows[i]) */
@@ -37,6 +41,10 @@ const props = defineProps<{
   hoverId: number | null
   /** 说话人头像解析(useChatRows.resolveSpeakerAvatar) */
   resolveSpeakerAvatar: SpeakerAvatarResolver
+  /** 说话人显示名解析(useChatRows.resolveSpeakerName) */
+  resolveSpeakerName: SpeakerNameResolver
+  /** 是否显示角色名称悬浮(store.showCharacterNames) */
+  showCharacterNames: boolean
 }>()
 
 const emit = defineEmits<{
@@ -52,6 +60,10 @@ const emit = defineEmits<{
   'panel-style-update': [messageId: number, style: Partial<{ panelIcon: number; panelBarColor: number; panelDecoAlt: boolean }>]
   delete: [row: ChatRow]
   duplicate: [row: ChatRow]
+  /** 在带头像的消息后插入一条同角色发言(编辑模式加号按钮) */
+  'insert-after': [row: ChatRow]
+  /** 角色名内联编辑提交:上抛父级统一写 store(空名 = 恢复默认显示名) */
+  'name-update': [row: ChatRow, name: string]
 }>()
 
 /**
@@ -75,6 +87,73 @@ const imageAnimating = computed(() => !props.isEditMode && !!props.row.prevRect)
  */
 const hasChoices = computed(
   () => (props.isEditMode || !!props.exportMode) && !!props.row.msg.choices?.length,
+)
+
+// ---- 角色名内联编辑(编辑模式点击气泡上方角色名小字) --------------------------
+/** 是否处于角色名编辑态(点击进入,blur/回车提交,Esc 取消) */
+const nameEditing = ref(false)
+/** 角色名编辑草稿(本地 ref,提交时上抛父级写 store) */
+const nameDraft = ref('')
+/** 角色名可编辑元素(contenteditable,文本由 nameDraft 手动同步) */
+const nameEl = ref<HTMLElement | null>(null)
+
+/** 点击角色名:进入内联编辑(预填当前显示名,含已有覆盖,便于微调) */
+function startNameEdit() {
+  if (!props.isEditMode) return
+  nameDraft.value = props.resolveSpeakerName(props.row.msg)
+  nameEditing.value = true
+}
+
+/** 编辑中实时同步 nameDraft(只读 textContent,plaintext-only 下粘贴也会被压成纯文本) */
+function onNameInput(e: Event) {
+  nameDraft.value = (e.target as HTMLElement).textContent ?? ''
+}
+
+/** 提交角色名:上抛父级统一写 store(空名视为"恢复默认"),并退出编辑态 */
+function commitName() {
+  if (!nameEditing.value) return
+  emit('name-update', props.row, nameDraft.value)
+  nameEditing.value = false
+}
+
+/** Esc:取消编辑,不提交 */
+function cancelNameEdit() {
+  nameEditing.value = false
+}
+
+/** 回车失焦提交(并阻止 contenteditable 默认插入换行) */
+function onNameKeydownEnter(e: KeyboardEvent) {
+  e.preventDefault()
+  ;(e.target as HTMLElement).blur()
+}
+
+// 外部同步:nameEl 挂载或 nameDraft 变化时写入可编辑元素。
+// 必须同时监听 nameEl——进入编辑态时 nameDraft 可能并未变化(预填=当前名),
+// 只监听 nameDraft 会导致元素挂载时空白。flush post 保证元素已挂载;
+// 聚焦输入中跳过,避免每次按键把光标重置到末尾(与聊天条标题编辑同手法)。
+watch(
+  [nameEl, nameDraft],
+  ([el, val]) => {
+    if (el && document.activeElement !== el) el.textContent = val
+  },
+  { flush: 'post' },
+)
+
+// 进入编辑态:聚焦 + 全选(便于直接覆盖输入)。
+// 必须在 nameEl 挂载后(post flush)执行;与上面的文本同步 watcher 分离注册,
+// 保证先同步文本再聚焦(聚焦后同步 watcher 会因 activeElement 命中而跳过)。
+watch(
+  [nameEditing, nameEl],
+  ([editing, el]) => {
+    if (!editing || !el) return
+    el.focus()
+    const range = document.createRange()
+    range.selectNodeContents(el)
+    const sel = window.getSelection()
+    sel?.removeAllRanges()
+    sel?.addRange(range)
+  },
+  { flush: 'post' },
 )
 
 /**
@@ -126,6 +205,28 @@ const imageAnimStyle = computed(() => {
     :style="pos(row.avatarX - CHAT_SCROLL.x, row.avatarTop - CHAT_SCROLL.y, CHAT.avatarBox, CHAT.avatarBox)"
     @click="emit('avatar-click', row)"
   />
+  <!-- 角色名称悬浮:贴在带头像消息的气泡上缘上方,悬浮于消息间空隙(不占布局);
+       锚定跟随气泡侧缘(other 左缘起向右 / mine 右缘起向左),仅带头像行显示。
+       编辑模式可点击进入内联改名(卡片级显示名覆盖,仅影响显示,不改写数据);
+       点击后原地变输入框(contenteditable),文本由 nameDraft 手动同步(不插值,避免光标重置) -->
+  <span
+    v-if="row.showAvatar && !hasChoices && showCharacterNames && nameEditing"
+    ref="nameEl"
+    class="chat-speaker-name chat-speaker-name--editable chat-speaker-name--editing"
+    contenteditable="plaintext-only"
+    :style="speakerNameStyle(row.msg.side, row.left - CHAT_SCROLL.x, row.left - CHAT_SCROLL.x + row.box.rectW, row.bubbleTop - CHAT_SCROLL.y)"
+    @input="onNameInput"
+    @blur="commitName"
+    @keydown.enter="onNameKeydownEnter"
+    @keydown.esc="cancelNameEdit"
+  ></span>
+  <span
+    v-else-if="row.showAvatar && !hasChoices && showCharacterNames"
+    class="chat-speaker-name"
+    :class="{ 'chat-speaker-name--editable': isEditMode }"
+    :style="speakerNameStyle(row.msg.side, row.left - CHAT_SCROLL.x, row.left - CHAT_SCROLL.x + row.box.rectW, row.bubbleTop - CHAT_SCROLL.y)"
+    @click="startNameEdit"
+  >{{ resolveSpeakerName(row.msg) }}</span>
   <ChatBubble
       v-if="!hasChoices && !row.msg.image && !row.msg.centered && !row.msg.panel"
       :text="row.displayText"
@@ -240,6 +341,22 @@ const imageAnimStyle = computed(() => {
     >
     <img class="chat-plus__icon" :src="MATERIALS.deleteMsgBtn" alt="+" />
   </button>
+    <!-- 编辑模式:带头像的消息,悬停在删除按钮旁显示"插入"按钮(icon_btn_cancel 旋转 45° 成"+")
+         点击在该消息之后插入一条"以该消息所属角色发言"的新消息(默认文本"新消息",
+         插入后点击气泡可内联编辑;与"补头像"加号互斥——那条只出现在无头像的合并消息) -->
+    <button
+      v-if="isEditMode && row.showAvatar && !hasChoices"
+      class="chat-plus"
+      :class="{ 'chat-plus--visible': hoverId === row.msg.id }"
+      type="button"
+      aria-label="在这条消息后插入一条发言"
+      :style="addBtnStyle(row, true)"
+      @mouseenter="emit('hover', row.msg.id)"
+      @mouseleave="emit('leave', row.msg.id)"
+      @click="emit('insert-after', row)"
+    >
+      <img class="chat-plus__icon" :src="MATERIALS.deleteMsgBtn" alt="+" />
+    </button>
     <!-- 编辑模式:居中提示文本行,悬停在删除按钮旁显示"添加"按钮(icon_btn_cancel 旋转 45° 成"+")
          点击在原文后复制插入一条相同的居中文本行(材质与删除/补头像钮同为 icon_btn_cancel) -->
     <button
@@ -362,5 +479,27 @@ const imageAnimStyle = computed(() => {
 // 编辑模式:消息头像可点击(非管理员消息,弹出底部角色头像菜单)
 .chat-avatar--pickable {
   cursor: pointer;
+}
+
+// 编辑模式:角色名可点击进入内联改名。
+// 全局 .chat-speaker-name 为 pointer-events:none(suspended 显示层),此处覆盖为可交互;
+// hover 提亮提示"可编辑"(灰字 #b8b6b4 → 更亮 #e3e1e1)。
+.chat-speaker-name--editable {
+  pointer-events: auto;
+  cursor: pointer;
+  user-select: none;
+
+  &:hover {
+    color: $color-subcard-text;
+  }
+}
+
+// 编辑态:原地变输入框(contenteditable),加下划线表明可输入;
+// 文字颜色保持与显示态一致($color-speaker-name 灰),仅交互提示不同。
+.chat-speaker-name--editing {
+  pointer-events: auto;
+  cursor: text;
+  border-bottom: 1px solid $color-chat-frame;
+  user-select: text;
 }
 </style>
