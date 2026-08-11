@@ -34,6 +34,11 @@ const emit = defineEmits<{
             <h3 class="ab__sub">更新日志</h3>
             <ul class="ab__log">
               <li class="ab__log-item">
+                <p class="ab__log-date">2026-08-11</p>
+                <p class="ab__log-desc">添加了多项自定义功能</p>
+                <p class="ab__log-desc">添加了名称显示</p>
+                <p class="ab__log-desc">修复了清空对话的Bug（可能大概也许是修复了？</p>
+                <p class="ab__log-desc"><del>移除了Herobrine</del></p>
                 <p class="ab__log-date">2026-08-10</p>
                 <p class="ab__log-desc">预览版上线</p>
               </li>
