@@ -6,16 +6,16 @@
 // 内容:应用标题 + 更新日志 + GitHub / B站 链接 + 结尾鸣谢文案(占位)。
 // 打开/关闭状态由父组件 App 持有。
 // =============================================================================
-import { MATERIALS } from '../../constants/materials'
+import { MATERIALS } from "../../constants/materials";
 
 defineProps<{
   /** 是否展开(App 的菜单按钮 toggle) */
-  open: boolean
-}>()
+  open: boolean;
+}>();
 
 const emit = defineEmits<{
-  (e: 'close'): void
-}>()
+  (e: "close"): void;
+}>();
 </script>
 
 <template>
@@ -23,10 +23,25 @@ const emit = defineEmits<{
     <div v-if="open" class="ab" @click.self="emit('close')">
       <div class="ab__panel">
         <!-- 背景装饰:左上角 + 右下角两张,原始尺寸原样贴角 -->
-        <img class="ab__corner ab__corner--tl" :src="MATERIALS.editPopDecoTl" alt="" />
-        <img class="ab__corner ab__corner--br" :src="MATERIALS.editPopDecoBr" alt="" />
+        <img
+          class="ab__corner ab__corner--tl"
+          :src="MATERIALS.editPopDecoTl"
+          alt=""
+        />
+        <img
+          class="ab__corner ab__corner--br"
+          :src="MATERIALS.editPopDecoBr"
+          alt=""
+        />
         <!-- 右上角 × 关闭按钮 -->
-        <button class="ab__close" type="button" aria-label="关闭" @click="emit('close')">×</button>
+        <button
+          class="ab__close"
+          type="button"
+          aria-label="关闭"
+          @click="emit('close')"
+        >
+          ×
+        </button>
         <h2 class="ab__title">明日方舟：终末地 Baker 模拟器</h2>
 
         <div class="ab__body">
@@ -43,15 +58,36 @@ const emit = defineEmits<{
           <section class="ab__section">
             <h3 class="ab__sub">相关链接</h3>
             <ul class="ab__links">
-              <li><a href="#" target="_blank" rel="noopener">GitHub</a></li>
-              <li><a href="#" target="_blank" rel="noopener">哔哩哔哩</a></li>
+              <li>
+                <a
+                  href="https://github.com/NCreeper233/endfield-baker-maker"
+                  target="_blank"
+                  rel="noopener"
+                  >GitHub</a
+                >
+              </li>
+              <li>
+                <a
+                  href="https://space.bilibili.com/1143315127"
+                  target="_blank"
+                  rel="noopener"
+                  >哔哩哔哩</a
+                >
+              </li>
             </ul>
           </section>
 
           <section class="ab__section">
             <h3 class="ab__sub">相关项目</h3>
             <ul class="ab__links">
-              <li><a href="https://ark.ncreeper.top/" target="_blank" rel="noopener">明日方舟：终末地风格LOGO生成器</a></li>
+              <li>
+                <a
+                  href="https://ark.ncreeper.top/"
+                  target="_blank"
+                  rel="noopener"
+                  >明日方舟：终末地风格LOGO生成器</a
+                >
+              </li>
             </ul>
           </section>
         </div>
@@ -61,8 +97,8 @@ const emit = defineEmits<{
 </template>
 
 <style scoped lang="scss">
-@use '../../styles/variables' as *;
-@use '../../styles/mixins' as *;
+@use "../../styles/variables" as *;
+@use "../../styles/mixins" as *;
 
 // 关于菜单:半透明遮罩 + 居中深色面板(复用弹窗外壳,类前缀 ab)
 @include dialog-shell(ab, 520px, 55%, 16px);
