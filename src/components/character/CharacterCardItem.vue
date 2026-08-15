@@ -126,6 +126,7 @@ function leave(event: PointerEvent) {
       :class="{ 'is-collapsed': collapsed, 'is-hover': hover === 'card' }"
       @pointerenter="enterCard"
       @pointerleave="leave($event)"
+      @click="chatStore.toggleCollapse(index)"
     >
       <div class="card__rect" />
       <img class="card__texture" :src="MATERIALS.cardTexture" alt="" />
@@ -143,12 +144,12 @@ function leave(event: PointerEvent) {
         role="button"
         :tabindex="isEditMode && isGroupCard ? 0 : -1"
         :aria-label="isEditMode && isGroupCard ? '自定义群聊头像' : undefined"
-        @click="onAvatarClick"
+        @click.stop="onAvatarClick"
         @keydown.enter.prevent="onAvatarClick"
         @keydown.space.prevent="onAvatarClick"
       >
         <!-- 裁剪夹层:overflow:hidden 限制 img scale 后的可见范围,
-             外层 &__avatar 保持 overflow:visible 让 chat-indicator 能超出边框显示 -->
+            外层 &__avatar 保持 overflow:visible 让 chat-indicator 能超出边框显示 -->
         <div class="card__avatar-clip">
           <img class="card__avatar-img" :src="character.avatar" alt="" />
         </div>
@@ -167,7 +168,7 @@ function leave(event: PointerEvent) {
           alt=""
         />
       </div>
-      <button class="card__btn" type="button" @click="chatStore.toggleCollapse(index)">
+      <button class="card__btn" type="button" @click.stop="chatStore.toggleCollapse(index)">
         <img class="card__btn-circle" :src="MATERIALS.circleBorder" alt="" />
         <img class="card__btn-arrow" :src="MATERIALS.cardArrow" alt="" />
       </button>
