@@ -1,6 +1,7 @@
 import { createApp } from 'vue'
 import { createPinia } from 'pinia'
 import App from './App.vue'
+import tooltip from './directives/tooltip'
 import { useChatStore } from './stores/chat'
 import { useChatPersistence } from './composables/useChatPersistence'
 import { BUBBLE_FONT_SIZE, BUBBLE_FONT } from './utils/measure'
@@ -20,6 +21,7 @@ async function bootstrap() {
   const pinia = createPinia()
   const app = createApp(App)
   app.use(pinia)
+  app.directive('tooltip', tooltip)
 
   // 启动恢复:在挂载前还原已存数据,避免"初始数据 → 已存数据"首帧跳变
   const chatStore = useChatStore(pinia)
