@@ -192,6 +192,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onToggleKeydown))
        播放模式下按 E 可隐藏/恢复(纯运行时状态,刷新重置为显示) -->
   <button
     v-show="!hideEditToggle"
+    v-tooltip="isEditMode ? '退出编辑模式' : '进入编辑模式'"
     class="edit-toggle"
     type="button"
     @click="chatStore.toggleEditMode()"
@@ -203,6 +204,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onToggleKeydown))
        确定后新建"未命名会话"主卡并自动选中(身份每张卡独立、创建后不可修改) -->
   <button
     v-if="isEditMode"
+    v-tooltip="'新建聊天'"
     class="edit-toggle edit-toggle--chat09"
     type="button"
     @click="onChatNew"
@@ -213,6 +215,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onToggleKeydown))
        点击切换"每条带头像的气泡上方是否显示小号灰字角色名"(localStorage 持久化) -->
   <button
     v-if="isEditMode"
+    v-tooltip="chatStore.showCharacterNames ? '隐藏角色名称' : '显示角色名称'"
     class="edit-toggle edit-toggle--character"
     :class="{ 'edit-toggle--active': chatStore.showCharacterNames }"
     type="button"
@@ -225,6 +228,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onToggleKeydown))
        点击弹出本地图片选择,上传图片作为自定义页面背景(原游戏背景被覆盖) -->
   <button
     v-if="isEditMode"
+    v-tooltip="'自定义背景'"
     class="edit-toggle edit-toggle--bg"
     type="button"
     @click="bgInput?.click()"
@@ -242,6 +246,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onToggleKeydown))
   <!-- 删除对话按钮:与 chat09 按钮同列(正下方),仅编辑模式显示;点击弹出确认弹窗 -->
   <button
     v-if="isEditMode"
+    v-tooltip="'删除对话'"
     class="edit-toggle edit-toggle--delete"
     type="button"
     @click="confirmOpen = !confirmOpen"
@@ -252,16 +257,17 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onToggleKeydown))
   <!-- 编辑模式右侧操作按钮:横向等距排列,仅编辑模式显示。
        导出 → 打开数据管理弹窗(统计/导出/导入/清空/重置;原独立"清除数据"按钮
        已并入此按钮) -->
-  <button v-if="isEditMode" class="edit-toggle edit-toggle--export" type="button" @click="dataManagerOpen = true">
+  <button v-if="isEditMode" v-tooltip="'数据管理'" class="edit-toggle edit-toggle--export" type="button" @click="dataManagerOpen = true">
     <img :src="MATERIALS.editBtnExport" alt="导出" />
   </button>
-  <button v-if="isEditMode" class="edit-toggle edit-toggle--share" type="button" @click="shareOpen = true">
+  <button v-if="isEditMode" v-tooltip="'分享聊天'" class="edit-toggle edit-toggle--share" type="button" @click="shareOpen = true">
     <img :src="MATERIALS.editBtnShare" alt="分享" />
   </button>
   <!-- 下载素材按钮:位于按钮列最左侧(about 左侧),icon_attackskillbig_down.png;
        点击下载 public/素材.zip(静态资源,仅在点击时才发起请求,不参与首屏加载) -->
   <a
     v-if="isEditMode"
+    v-tooltip="'下载素材包'"
     class="edit-toggle edit-toggle--download"
     :href="downloadHref"
     download="素材.zip"
@@ -273,6 +279,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onToggleKeydown))
        点击打开关于/更新日志/链接弹窗 -->
   <button
     v-if="isEditMode"
+    v-tooltip="'关于'"
     class="edit-toggle edit-toggle--about"
     type="button"
     @click="aboutOpen = true"
