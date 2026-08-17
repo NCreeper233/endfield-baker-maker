@@ -355,14 +355,6 @@ function titleOf(
   personaLabel: string,
   displayNameOf: (m: ConversationMember) => string,
 ): string {
-  // 如果成员数量 ≤1，清除过期的群聊标题
-  if (members.length <= 1 && conv.customTitle) {
-    // 这里需要确保不会误删用户手动设置的标题
-    // 可以添加一个标记来区分自动生成和手动设置的标题
-    if (!conv.customTitle) {
-      conv.customTitle = undefined
-    }
-  }
   if (conv.customTitle) return conv.customTitle
   if (members.length === 0) return '未命名会话'
   if (members.length === 1) return displayNameOf(members[0])
