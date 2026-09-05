@@ -7,7 +7,7 @@
 // 设计理由:从 ChatArea 消息循环中抽出,模板行数减负;所有交互以 emit 上报,
 //          父组件统一处理 hover 缓存 / store 写入。
 // =============================================================================
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch, nextTick } from 'vue'
 import { CHAT, CHAT_SCROLL } from '../../constants/design'
 import { MATERIALS } from '../../constants/materials'
 import {
@@ -98,10 +98,15 @@ const nameDraft = ref('')
 const nameEl = ref<HTMLElement | null>(null)
 
 /** 点击角色名:进入内联编辑(预填当前显示名,含已有覆盖,便于微调) */
-function startNameEdit() {
+async function startNameEdit() {
   if (!props.isEditMode) return
   nameDraft.value = props.resolveSpeakerName(props.row.msg)
+  nameDraft.value = props.resolveSpeakerName(props.row.msg)
   nameEditing.value = true
+  await nextTick()
+  if (nameEl.value) {
+    nameEl.value.textContent = nameDraft.value
+  }
 }
 
 /** 编辑中实时同步 nameDraft(只读 textContent,plaintext-only 下粘贴也会被压成纯文本) */

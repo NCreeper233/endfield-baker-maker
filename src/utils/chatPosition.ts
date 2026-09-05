@@ -164,11 +164,24 @@ export function delBtnStyle(row: ChatRow): BoxStyle {
  * 位置中心与删除按钮水平对齐。
  */
 export function addBtnStyle(row: ChatRow, hasTail: boolean): BoxStyle {
+  const { bodyLeft, bodyRight } = bubbleBodyLR(row)
   const scrolledTop = row.bubbleTop - CHAT_SCROLL.y
-  const bodyLeft = row.left - CHAT_SCROLL.x + (hasTail ? TAIL : 0)
-  const bodyRight = bodyLeft + row.box.rectW
-  const visLeft = bodyRight + MSG_DEL_GAP + MSG_DEL_BTN_W + MSG_DEL_GAP
   const visTop = scrolledTop + (row.box.rectH - PLUS_VIS) / 2
   const box = PLUS_VIS + PLUS_HIT * 2
+
+  const isMineNormal = row.msg.side === 'mine' && !row.msg.panel && !row.msg.centered
+
+  let visLeft: number
+
+  if (isMineNormal) {
+    // 我方：视觉顺序 [删] [+] [气泡]
+    const delLeft = bodyLeft - MSG_DEL_BTN_W - MSG_DEL_GAP
+    visLeft = delLeft - PLUS_VIS - MSG_DEL_GAP
+  } else {
+    // 对方 / 居中 / 面板：视觉顺序 [气泡] [删] [+]
+    const delLeft = bodyRight + MSG_DEL_GAP
+    visLeft = delLeft + MSG_DEL_BTN_W + MSG_DEL_GAP
+  }
+
   return pos(visLeft - PLUS_HIT, visTop - PLUS_HIT, box, box)
 }

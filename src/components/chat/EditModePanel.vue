@@ -58,7 +58,7 @@ const BTN_ICONS = [
 const POP_TRIGGER_BTN_INDEX = 4
 
 /** 各按钮的无障碍标签 */
-const BTN_LABELS = ['任务面板', '以选项发送', '居中文本', '上传图片', '表情', '发送消息']
+const BTN_LABELS = ['创建任务面板', '以选项发送', '以居中文本发送', '上传图片', '表情', '发送消息']
 
 /** 输入区组件实例(经 expose 触发发送 / 文件选择 / 表情插入) */
 const composerRef = ref<InstanceType<typeof EditComposer> | null>(null)
@@ -276,6 +276,7 @@ defineExpose({
     <div class="edit-panel__btns">
       <button
         v-for="(icon, i) in BTN_ICONS"
+        v-tooltip="BTN_LABELS[i]"
         :key="i"
         class="edit-panel__btn"
         type="button"
