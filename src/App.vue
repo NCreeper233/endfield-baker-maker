@@ -20,6 +20,7 @@ import AboutDialog from './components/layout/AboutDialog.vue'
 import CustomCharacterDialog from './components/character/CustomCharacterDialog.vue'
 import GroupAvatarDialog from './components/character/GroupAvatarDialog.vue'
 import IdentityDialog from './components/chat/IdentityDialog.vue'
+import SettingsDialog from './components/layout/SettingsMenu.vue'
 import { useChatStore } from './stores/chat'
 import { storeToRefs } from 'pinia'
 import type { CustomCharacter } from './constants/character'
@@ -67,6 +68,9 @@ const groupAvatarCardIndex = ref<number | null>(null)
 
 /** 新建父级对话的"我方身份"选择弹窗是否展开(聊天按钮触发) */
 const identityDialogOpen = ref(false)
+
+/** 播放设置弹窗是否展开(设置按钮 toggle) */
+const settingsOpen = ref(false)
 
 /** 目标卡片已保存的自定义群聊头像(传给弹窗预载入 / 显示"恢复默认") */
 const currentGroupAvatar = computed(() => {
@@ -199,6 +203,16 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onToggleKeydown))
   >
     <img :src="isEditMode ? MATERIALS.editModeActive : MATERIALS.editModeToggle" alt="编辑" />
   </button>
+  <!-- 设置菜单:仅编辑模式显示,调节自动播放消息间隔 -->
+  <button
+    v-if="isEditMode"
+    v-tooltip="'播放设置'"
+    class="edit-toggle edit-toggle--settings"
+    type="button"
+    @click="settingsOpen = true"
+  >
+    <img :src="MATERIALS.loginBtnSetting" alt="设置" />
+  </button>
 <!-- 编辑模式专属按钮:位于编辑切换按钮下方,同样式,仅编辑模式显示;
        选中子对话且父级展开时直接追加子会话;否则弹"我方身份"选择弹窗,
        确定后新建"未命名会话"主卡并自动选中(身份每张卡独立、创建后不可修改) -->
@@ -323,6 +337,8 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onToggleKeydown))
     @open-custom-character="onIdentityOpenCustomCharacter"
     @close="identityDialogOpen = false"
   />
+  <!-- 播放设置弹窗:设置按钮触发,调节自动播放消息间隔 -->
+  <SettingsDialog :open="settingsOpen" @close="settingsOpen = false" />
 </template>
 
 <style scoped lang="scss">
@@ -342,42 +358,46 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onToggleKeydown))
   height: auto;
 
   // 编辑模式专属按钮:位于编辑切换按钮左侧(横向排布,每个按钮间距 75px)
-  &--chat09 {
+  &--settings {
     right: 135px;
+  }
+
+  &--chat09 {
+    right: 210px;
   }
 
   // 角色名称开关按钮:位于 chat09 与背景按钮之间(同排横向等距,75px)
   &--character {
-    right: 210px;
+    right: 285px;
   }
 
   // 背景自定义按钮:位于角色名按钮左侧(同排横向等距,75px)
   &--bg {
-    right: 285px;
+    right: 360px;
   }
 
   // 删除对话按钮:位于背景按钮左侧(同排横向等距)
   &--delete {
-    right: 360px;
+    right: 435px;
   }
 
   // 右侧操作按钮(导出/分享):横向等距排列(每个按钮间距 75px;原清除数据按钮已并入导出按钮)
   &--export {
-    right: 435px;
+    right: 510px;
   }
 
   &--share {
-    right: 510px;
+    right: 585px;
   }
 
   // 关于菜单按钮:位于按钮列最左侧(share 左侧,同排横向等距)
   &--about {
-    right: 585px;
+    right: 660px;
   }
 
   // 下载素材按钮:位于按钮列最左侧(about 左侧,同排横向等距)
   &--download {
-    right: 660px;
+    right: 735px;
     text-decoration: none;
   }
 
@@ -426,37 +446,41 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onToggleKeydown))
       width: 20px;
     }
 
-    &--chat09 {
+    &--settings {
       right: 50px;
+    }
+
+    &--chat09 {
+      right: 88px;
     }
 
     // 角色名按钮:位于 chat09 与背景按钮之间(38px 间距)
     &--character {
-      right: 88px;
-    }
-
-    &--bg {
       right: 126px;
     }
 
-    &--delete {
+    &--bg {
       right: 164px;
     }
 
-    &--export {
+    &--delete {
       right: 202px;
     }
 
-    &--share {
+    &--export {
       right: 240px;
     }
 
-    &--about {
+    &--share {
       right: 278px;
     }
 
-    &--download {
+    &--about {
       right: 316px;
+    }
+
+    &--download {
+      right: 354px;
     }
   }
 }

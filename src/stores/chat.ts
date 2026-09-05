@@ -163,6 +163,12 @@ let choiceIdCounter = 0
 /** 角色名称显示开关的 localStorage key(设置类数据,独立于工程数据) */
 const CHAR_NAMES_STORAGE_KEY = 'endfield-baker-char-names'
 
+/** 自动播放消息间隔的 localStorage key(秒数) */
+const MSG_INTERVAL_KEY = 'endfield-baker-msg-interval'
+
+/** 加载动画时长的 localStorage key(秒数) */
+const LOADING_DUR_KEY = 'endfield-baker-loading-dur'
+
 /** 读取角色名称显示开关(未记录 / 读取异常回退 false) */
 function readCharacterNamesToggle(): boolean {
   try {
@@ -501,6 +507,64 @@ export const useChatStore = defineStore('chat', () => {
     } catch {
       // 存储失败:仅本次会话生效,刷新恢复默认,不影响主流程
       console.warn('[store] 角色名称开关保存失败,刷新后将重置')
+    }
+  }
+
+  /**
+   * 自动播放消息间隔(秒):两条消息之间的停顿时间
+   *
+   * 设置类数据:localStorage 独立 key 持久化。
+   * 范围 0.5~5 秒,默认 2 秒。
+   * 读取异常/写入失败静默降级为 2。
+   */
+  function readMessageInterval(): number {
+    try {
+      const v = localStorage.getItem(MSG_INTERVAL_KEY)
+      if (v === null) return 2
+      const n = Number(v)
+      return n >= 0.5 && n <= 5 ? n : 2
+    } catch {
+      return 2
+    }
+  }
+
+  const messageInterval = ref(readMessageInterval())
+
+  function setMessageInterval(seconds: number) {
+    messageInterval.value = seconds
+    try {
+      localStorage.setItem(MSG_INTERVAL_KEY, String(seconds))
+    } catch {
+      console.warn('[store] 消息间隔保存失败,刷新后将重置')
+    }
+  }
+
+  /**
+   * 加载动画播放时长(秒):LoadingBubble 显示的停顿时间
+   *
+   * 设置类数据:localStorage 独立 key 持久化。
+   * 范围 0.2~3 秒,默认 1 秒。
+   * 读取异常/写入失败静默降级为 1。
+   */
+  function readLoadingDuration(): number {
+    try {
+      const v = localStorage.getItem(LOADING_DUR_KEY)
+      if (v === null) return 1
+      const n = Number(v)
+      return n >= 0.2 && n <= 3 ? n : 1
+    } catch {
+      return 1
+    }
+  }
+
+  const loadingDuration = ref(readLoadingDuration())
+
+  function setLoadingDuration(seconds: number) {
+    loadingDuration.value = seconds
+    try {
+      localStorage.setItem(LOADING_DUR_KEY, String(seconds))
+    } catch {
+      console.warn('[store] 加载动画时长保存失败,刷新后将重置')
     }
   }
 
@@ -1618,6 +1682,12 @@ export const useChatStore = defineStore('chat', () => {
     // 角色名称显示开关(localStorage 持久化)
     showCharacterNames,
     toggleShowCharacterNames,
+    // 自动播放消息间隔(localStorage 持久化)
+    messageInterval,
+    setMessageInterval,
+    // 加载动画时长(localStorage 持久化)
+    loadingDuration,
+    setLoadingDuration,
     replaceAllCards,
     updateMessageText,
     updatePanelStyle,

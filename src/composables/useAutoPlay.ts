@@ -65,7 +65,7 @@ const CHAT_IN_MS = 300
  */
 export function useAutoPlay() {
   const chatStore = useChatStore()
-  const { playingSub, pendingChoice } = storeToRefs(chatStore)
+  const { playingSub, pendingChoice, messageInterval, loadingDuration } = storeToRefs(chatStore)
 
   /** 当前持有的定时器句柄(loading 阶段或 content 阶段或 choice 恢复延迟) */
   let timer: ReturnType<typeof setTimeout> | null = null
@@ -122,7 +122,7 @@ export function useAutoPlay() {
     const lastSide = played.length > 0 ? played[played.length - 1].side : null
     const nextSide = chatStore.loadingSide
     const crossSide = lastSide !== null && nextSide !== null && lastSide !== nextSide
-    const loadingMs = crossSide ? LOADING_MS_CROSS : LOADING_MS
+    const loadingMs = loadingDuration.value * 1000 * (crossSide ? 1.5 : 1)
 
     timer = setTimeout(() => {
       // 推进:playedCount++(内部 setLoading=false),若播完 store 自动置 playingSub=null
@@ -139,7 +139,7 @@ export function useAutoPlay() {
         timer = null
         // 仍处于同一播放则进入下一周期(scheduleCycle 开头会预判选择点)
         if (chatStore.playingSub !== null) scheduleCycle()
-      }, CONTENT_MS)
+      }, messageInterval.value * 1000)
     }, loadingMs)
   }
 
@@ -171,7 +171,7 @@ export function useAutoPlay() {
           timer = setTimeout(() => {
             timer = null
             if (chatStore.playingSub !== null) scheduleCycle()
-          }, CHOICE_RESUME_MS)
+          }, messageInterval.value * 1000)
         }
       }
     },

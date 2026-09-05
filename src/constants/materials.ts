@@ -69,6 +69,9 @@ import deleteMsgBtn from '../assets/materials/icon_btn_cancel.webp'
 // 群聊头像(多人对话默认显示)
 import groupAvatar from '../assets/materials/icon_sns_npc_channel_a.webp'
 
+// 设置按钮(login 页面设置图标)
+import loginBtnSetting from '../assets/materials/login_btn_setting.webp'
+
 /**
  * 内置素材 URL 表。
  *
@@ -155,6 +158,8 @@ export const MATERIALS = {
   deleteMsgBtn,
   // 群聊头像(多人对话默认显示)
   groupAvatar,
+  // 设置按钮
+  loginBtnSetting,
 } as const
 
 /** 素材键名集合(供类型推导用) */
